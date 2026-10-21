@@ -1,3 +1,3 @@
-# 音盒 · 轻量播放库
+# yinbox-lite（旧地址跳转页）
 
-只放播放器与歌单，歌曲地址引用 yinbox-cloud 线上媒体，仓库轻量、部署秒级。
+自动跳转到 https://whxclp.github.io/yinbox/
