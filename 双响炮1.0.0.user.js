@@ -14834,6 +14834,8 @@
       const rec = Object.assign({ url: url }, info);
       // 首次捕获时间：供合并面板默认选中“最近抓到的”那条（当前这首），避免选到上一首
       if (typeof rec.ts !== "number") rec.ts = Date.now();
+      // 捕获时的页面标题：页面标识区分不了内容时（同 URL 切歌/切集），用它锁定“正在播的那一条”
+      if (typeof rec.title !== "string") rec.title = String(document.title || "").slice(0, 120);
       // 腾讯分段：每抓到一个地址就递增编号（出现顺序即编号），面板显示用；合并排序仍按列表顺序 plSeq
       if (location.host.indexOf("v.qq.com") >= 0 && (rec.type === "ts" || typeof rec.plSeq === "number")) {
         this.$data.capSeq = (this.$data.capSeq || 0) + 1;
@@ -14932,12 +14934,9 @@
       });
       // 只展示"当前这首/这集"：上一首的同页记录已由 _sxpoPurgeStaleSongs 清掉，
       // 这里再按标识过滤一次，防止切换瞬间的残留记录混进列表和合并候选
-      const __sniffed = __all.filter((it) => {
-        const k = it.contentKey || "";
-        // 严格匹配当前标识：相等，或“当前标识 + |pl:列表标识”。
-        // 旧写法用前缀匹配，id=123 会命中 id=1234 这类旧歌/旧集记录
-        return !k || k === __nowSig || k.indexOf(__nowSig + "|pl:") === 0;
-      });
+      // 统一“当前内容”过滤：只保留正在播的那一条（页面标识 + 标题双重判定）
+      const __isCur = this._sxpoCurrentFilter();
+      const __sniffed = __all.filter((it) => __isCur(it));
       // 抖音优先用页面解析出的完整直链（无水印视频流/音频流），抓包拿到的是分段 Range 地址，
       // 单独下载往往只有一小段或直接失败，所以解析成功时不再显示抓包条目
       const __parsedAll = this._sxpoDouyinSources(__nowSig);
@@ -15115,30 +15114,23 @@
         let __ready = 0, __fail = 0, __pend = 0, __parts = 0;
         const __rec = (this.$data.tcAuto || {})[location.origin + location.pathname];
         if (__rec) { __parts = __rec.parts.length; for (const ent of __rec.segs.values()) { if (ent.state === "ready") __ready++; else if (ent.state === "failed") __fail++; else __pend++; } }
-        // 类型判断：①整集列表型 ②m3u8型 ③直链型（以上为腾讯分段三型）；其余按站点分：抖音/B站/普通
-        let __type = "识别中…";
-        const __hasM3u8 = sources.some((s) => s.type === "m3u8");
-        const __isQQ = location.host.indexOf("v.qq.com") >= 0;
-        if (__st.pl > 0 && this._tcStore().endlist && (this._tcStore().listReg || 0) >= 10) __type = "整集列表型（下完即合并）";
-        else if (__isQQ && __rec && __rec.segs.size > 0) __type = "直链型（看完才能合并）";
-        else if (__hasM3u8) __type = "m3u8型（点下面 m3u8 条目的「下载」即可）";
-        else if (__rec && __rec.segs.size > 0) __type = "直链型（看完才能合并）";
-        else {
-          const __h = location.host;
-          if (__h.indexOf("douyin") >= 0) __type = __parsed.length ? "抖音直链型（点条目「下载」）" : "抖音型（点条目「下载」）";
-          else if (__h.indexOf("bilibili") >= 0) __type = "B站型（点条目「下载」）";
-          else __type = "普通型（点条目「下载」）";
-        }
+        // 统一状态（不分站点形态）：分段型看“是否抓全”，直链/分离型看“视频+音频是否齐”
+        const __readyText = this._sxpoReadiness(sources);
+        // 腾讯暂存统计只在有数据时显示，其他站点不摆一堆 0
+        const __stat = (__st.pl || __st.seg || __parts || __ready || __pend || __fail)
+          ? "｜表" + __st.pl + " 登" + __st.seg + " 存" + __ready + (__pend ? " 下" + __pend : "") + (__fail ? " 败" + __fail : "") + " 卷" + __parts + (this.$data.skipDup ? " 跳" + this.$data.skipDup : "")
+          : (this.$data.skipDup ? "｜跳" + this.$data.skipDup : "");
         let __prog = "";
         const __ttl = ((__rec && __rec.title) || this._sxpoTrackTitle() || "").trim().slice(0, 30);
-        if (__rec || __type !== "识别中…") {
-          const __state = __rec ? (__rec.finalized ? (__rec.saved ? "已合并完成" : "合并中") : "抓取中") : "—";
-          __prog = '<div data-sxpo-live>当前：<b>《' + escapeDlHtml(__ttl || "当前视频") + "》</b>" + __type + "　本首 <b>" + sources.length + "</b> 个地址" +
-            "　状态：<b>" + __state + "</b></div>";
+        {
+          const __state = __rec ? (__rec.finalized ? (__rec.saved ? "已合并完成" : "合并中") : "抓取中") : "";
+          __prog = '<div data-sxpo-live>当前：<b>《' + escapeDlHtml(__ttl || "当前视频") + "》</b>　本首 <b>" + sources.length + "</b> 个地址" +
+            '　<span data-sxpo-ready style="font-weight:600;">' + escapeDlHtml(__readyText) + "</span>" +
+            (__state ? "　后台：<b>" + __state + "</b>" : "") + "</div>";
         }
         const __sw = (() => { try { return localStorage.getItem("sxpo_tc_auto") !== "0"; } catch (eS) { return true; } })();
         __tcBox = '<div style="margin:4px 8px 0;padding:6px 8px;background:#f0f7ff;border:1px solid #b3d8ff;border-radius:6px;color:#245;font-size:13px;">' + __prog +
-          "<div>共 " + sources.length + " 个｜表" + __st.pl + " 登" + __st.seg + " 存" + __ready + (__pend ? " 下" + __pend : "") + (__fail ? " 败" + __fail : "") + " 卷" + __parts + (this.$data.skipDup ? " 跳" + this.$data.skipDup : "") +
+          "<div>共 " + sources.length + " 个" + __stat +
           "｜<a href='javascript:;' data-tc-auto-sw style='color:#0055aa;'>自动下载：" + (__sw ? "开" : "关") + "</a></div></div>";
       } catch (eT) {}
       const titleText = (filter === "audio" ? "音频下载" : "视频下载") + " v" + __ver;
@@ -15217,6 +15209,14 @@
         __liveTimer = setInterval(() => {
           try {
             if (!__dlgAlive()) { clearInterval(__liveTimer); return; }
+            // 实时刷新顶部“未齐/已齐/已抓全”
+            try {
+              const $ready = $dialog.$pops.querySelector("[data-sxpo-ready]");
+              if ($ready) {
+                const __f = this._sxpoCurrentFilter();
+                $ready.textContent = this._sxpoReadiness(Array.from(this.$data.videoUrlMap.values()).filter(__f));
+              }
+            } catch (eRd) {}
             // 实时刷新“抓取进度 / 是否抓全”
             try {
               const $tsBox = $dialog.$pops.querySelector("[data-sxpo-ts-status]");
@@ -16375,15 +16375,41 @@
       await mbOutput.finalize();
       return mbOutput.target.buffer;
     },
+    // 统一“当前内容”过滤（通用，不分站点形态）：
+    // ① 页面标识能区分内容（带 id 参数：抖音 aweme_id、B站 p、QQ 音乐 songid…）→ 直接用页面标识；
+    // ② 区分不了时（同 URL 切歌/切集的歌单页、音频区）→ 再叠加“捕获时的标题”，只留正在播的那一条。
+    // 返回过滤器（预先取好标识/标题，避免逐条重算）。
+    _sxpoCurrentFilter() {
+      const sig = this._sxpoPageSig();
+      const needTitle = sig.indexOf("?") < 0;
+      // 与 addVideoSource 里记录的 rec.title 同口径（都是 document.title），否则会全被过滤掉
+      const title = needTitle ? String(document.title || "").slice(0, 120) : "";
+      return (it) => {
+        const k = String(it.contentKey || "");
+        if (k && k !== sig && k.indexOf(sig + "|pl:") !== 0) return false;
+        if (title) { const rt = String(it.title || ""); if (rt && rt !== title) return false; }
+        return true;
+      };
+    },
+    // 统一状态描述：分段型看“是否抓全”，直链/分离型看“视频+音频是否齐”
+    _sxpoReadiness(items) {
+      const __tsN = items.filter((s) => /(\.ts|\.m4s|\.265ts)(\?|#|$)/i.test(s.url)).length;
+      const __hasV = items.some((s) => s.mediaType === "video" && s.type !== "m3u8" && s.type !== "mpd");
+      const __hasA = items.some((s) => s.mediaType === "audio" && s.type !== "m3u8" && s.type !== "mpd");
+      if (__tsN >= 2) {
+        const st = this._sxpoCaptureStatus(__tsN);
+        return st.complete ? "✅ 已抓全，可以合并" : "⏳ 未抓全（" + st.text + "）";
+      }
+      if (__hasV && __hasA) return "✅ 已齐：视频 + 音频，可以合并";
+      if (__hasV) return "⏳ 未齐：还缺音频流";
+      if (__hasA) return "⏳ 未齐：还缺视频流";
+      return "✅ 已齐";
+    },
     // 当前这首/这集抓到的 ts 分段（与面板列表同一套过滤条件）
     _sxpoCurrentTsItems() {
-      const nowSig = this._sxpoPageSig();
       const isTs = (u) => /\.ts(\?|#|$)/i.test(u) || /\.265ts(\?|#|$)/i.test(u);
-      return Array.from(this.$data.videoUrlMap.values()).filter((it) => {
-        if (!isTs(it.url)) return false;
-        const k = it.contentKey || "";
-        return !k || k === nowSig || k.indexOf(nowSig + "|pl:") === 0;
-      });
+      const f = this._sxpoCurrentFilter();
+      return Array.from(this.$data.videoUrlMap.values()).filter((it) => isTs(it.url) && f(it));
     },
     // 抓取完整性判断：分段是边播边抓的，用它决定“现在能不能合并”
     // 返回 { complete, pct, text }：complete=已抓全/已到片尾；text=给面板和提示用的人话
