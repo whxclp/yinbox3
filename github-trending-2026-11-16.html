@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub Trending 速查 · 2026-11-16</title>
+<style>
+  :root { --ink:#1f2328; --muted:#5f5e5a; --line:#d8d8d3; --bg:#ffffff; --soft:#f6f7f9; --accent:#185fa5; --hot:#a32d2d; }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:32px 20px 48px; background:var(--bg); color:var(--ink);
+         font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif; font-size:14px; line-height:1.65; }
+  .wrap { max-width:900px; margin:0 auto; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 4px; }
+  .sub { color:var(--muted); margin:0 0 28px; font-size:13px; }
+  h2 { font-size:16px; font-weight:600; margin:32px 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line); }
+  code { background:var(--soft); padding:1px 5px; border-radius:4px; font-size:12.5px;
+         font-family:Consolas,"Courier New",monospace; }
+  ul { margin:0 0 12px; padding-left:22px; }
+  li { margin:6px 0; }
+  .tip { background:#eef5fc; border-left:3px solid var(--accent); padding:10px 14px; border-radius:0 8px 8px 0; margin:14px 0 18px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:12px; }
+  .card { border:1px solid var(--line); border-radius:10px; padding:14px 16px; background:var(--bg); }
+  .card .name { font-weight:600; font-size:14px; margin-bottom:6px; }
+  .card .url { font-family:Consolas,"Courier New",monospace; font-size:12px; color:var(--muted);
+               word-break:break-all; line-height:1.5; margin-bottom:10px; }
+  button { border:1px solid var(--line); background:var(--soft); color:var(--ink); border-radius:6px;
+           padding:5px 14px; font-size:12.5px; cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { background:var(--soft); font-weight:600; color:var(--muted); font-size:12.5px; }
+  tbody tr:nth-child(even) { background:#fbfbfc; }
+  .repo { font-family:Consolas,"Courier New",monospace; font-size:12.5px; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .hot { color:var(--hot); font-weight:600; }
+  .tag { display:inline-block; font-size:11.5px; padding:1px 7px; border-radius:4px; background:#eef5fc; color:var(--accent); }
+  .tag.t2 { background:#fcebeb; color:var(--hot); }
+  .note { color:var(--muted); font-size:13px; }
+  footer { margin-top:30px; color:var(--muted); font-size:12px; border-top:1px solid var(--line); padding-top:12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>GitHub Trending 速查</h1>
+  <p class="sub">2026-11-16 抓取 · 筛选找不到怎么办 + 今日榜 AI Agent / 交易方向摘要</p>
+
+  <h2>一、为什么找不到「右上角三个筛选」</h2>
+  <ul>
+    <li>先确认地址：推荐卡片流是 <code>github.com/explore</code>，那里<strong>本来就没有</strong>时间 / 语言筛选；带筛选的榜单在 <code>github.com/trending</code>。</li>
+    <li>Trending 顶部那一行工具栏是 <strong>JS 异步加载</strong>的。好助理抓静态页时只拿到仓库列表，完全没有 Date range / Language 的控件文字 —— 国内网络下这块很容易空白或一直 Loading。</li>
+    <li>GitHub 改版多次：语言选择常在左侧或中部，Date range 在右上，窄屏还会折叠进下拉。「右上角三个」这个说法不够准，好助理更正。</li>
+  </ul>
+  <p class="tip">最省事的解法：别找 UI，直接拼 URL。下列参数已实测生效 —— <code>/trending/python?since=weekly&amp;spoken_language_code=zh</code> 返回的就是「Python · 本周 · 中文」榜。</p>
+  <div class="cards">
+    <div class="card"><div class="name">今日总榜（默认）</div><div class="url" data-url="https://github.com/trending">https://github.com/trending</div><button type="button">一键复制</button></div>
+    <div class="card"><div class="name">本周 · 中文项目</div><div class="url" data-url="https://github.com/trending?since=weekly&amp;spoken_language_code=zh">https://github.com/trending?since=weekly&amp;spoken_language_code=zh</div><button type="button">一键复制</button></div>
+    <div class="card"><div class="name">本周 · Python · 中文</div><div class="url" data-url="https://github.com/trending/python?since=weekly&amp;spoken_language_code=zh">https://github.com/trending/python?since=weekly&amp;spoken_language_code=zh</div><button type="button">一键复制</button></div>
+    <div class="card"><div class="name">本月总榜（中期确认用）</div><div class="url" data-url="https://github.com/trending?since=monthly">https://github.com/trending?since=monthly</div><button type="button">一键复制</button></div>
+  </div>
+  <p class="note">参数规则：时间 <code>?since=daily|weekly|monthly</code>；编程语言走路径 <code>/trending/typescript</code>；README 语言 <code>&amp;spoken_language_code=zh</code>。想看 AI Agent 扎堆的 TypeScript 周榜：<code>https://github.com/trending/typescript?since=weekly</code></p>
+
+  <h2>二、今日榜摘要 · AI Agent / 交易方向</h2>
+  <p class="note">数据源 <code>github.com/trending</code>（Today），按方向归类；「今日 +star」才是当日热度，总 star 只是历史存量。</p>
+  <table>
+    <thead><tr><th>仓库</th><th>方向 / 一句话</th><th class="num">今日 +star</th><th class="num">总 star</th><th>语言</th></tr></thead>
+    <tbody>
+      <tr><td class="repo">tradermonty/claude-trading-skills</td><td><span class="tag t2">交易·唯一命中</span> 股票投资者的 Claude Code 技能：市场分析、技术图表、经济日历、选股器、策略开发</td><td class="num hot">841</td><td class="num">5,999</td><td>Python</td></tr>
+      <tr><td class="repo">dream-num/univer</td><td>AI Office SDK，把文档 / 表格 / 协作能力喂给 AI agent</td><td class="num hot">1,878</td><td class="num">27,475</td><td>TS</td></tr>
+      <tr><td class="repo">alibaba/open-code-review</td><td>确定性流水线 + LLM Agent 的代码审查，行级批注</td><td class="num">946</td><td class="num">52,670</td><td>Go</td></tr>
+      <tr><td class="repo">ChromeDevTools/chrome-devtools-mcp</td><td>给 coding agent 用的 Chrome DevTools（你在折腾的浏览器扩展方向）</td><td class="num">837</td><td class="num">57,430</td><td>TS</td></tr>
+      <tr><td class="repo">ag-ui-protocol/ag-ui</td><td>Agent ↔ 前端交互协议</td><td class="num">790</td><td class="num">18,394</td><td>TS</td></tr>
+      <tr><td class="repo">backnotprop/plannotator</td><td>Agent 工作区：规划、批注、审阅、反馈一把梭</td><td class="num">689</td><td class="num">12,232</td><td>TS</td></tr>
+      <tr><td class="repo">kajisho5/ffmpeg-skill</td><td><span class="tag">Agent Skills</span> 本地视频剪辑 MCP：42 个 FFmpeg 工具、无需云和密钥</td><td class="num">331</td><td class="num">6,157</td><td>Python</td></tr>
+      <tr><td class="repo">google-research/paper-orchestra</td><td><span class="tag">Agent Skills</span> 多 Agent 自动写研究论文</td><td class="num">306</td><td class="num">1,037</td><td>Python</td></tr>
+      <tr><td class="repo">google-labs-code/stitch-skills</td><td><span class="tag">Agent Skills</span> 遵循 Agent Skills 开放标准的技能库，兼容 Claude Code / Cursor</td><td class="num">247</td><td class="num">9,584</td><td>TS</td></tr>
+      <tr><td class="repo">mvanhorn/last30days-skill</td><td><span class="tag">Agent Skills</span> 跨 Reddit / X / YouTube / HN / Polymarket 调研并综合（消息面可用）</td><td class="num">122</td><td class="num">67,843</td><td>Python</td></tr>
+      <tr><td class="repo">NVIDIA/SkillEvaluator</td><td><span class="tag">Agent Skills</span> Agent 技能评测框架，含质量门禁与语义重叠检测</td><td class="num">122</td><td class="num">2,248</td><td>Python</td></tr>
+    </tbody>
+  </table>
+  <p class="note" style="margin-top:12px">中文周榜里另有交易 / Agent 相关：<code>Rockyzsu/stock</code>（30 天掌握量化交易，本周 +28）、<code>zhayujie/CowAgent</code>（个人 AI 助手，本周 +130）、<code>AstrBotDevs/AstrBot</code>（本周 +597）。</p>
+
+  <h2>三、按你定的判据看一眼</h2>
+  <p>Agent Skills 方向今天<strong>扎堆上榜</strong>（5 个以上），属板块联动，不是孤票；交易方向只有 <code>claude-trading-skills</code> 一个，属孤票。但好助理手里只有今天一份快照，「连续 3 天以上挂日榜」还没验证 —— <strong>不能下「真趋势」结论</strong>，再观察 2~3 天。另外周榜是滚动 7 天增量之和，今天爆的量本身就在窗口里，还会残留 7 天，所以「进了周榜」不等于延续。</p>
+
+  <footer>好助理整理 · 数据抓取于北京时间 2026-11-16 22:05 前后 · 榜单实时变动，数字以页面当时为准</footer>
+</div>
+<script>
+document.querySelectorAll('.card button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var card = btn.closest('.card');
+    var text = card.querySelector('.url').getAttribute('data-url');
+    var done = function () { btn.textContent = '已复制'; setTimeout(function () { btn.textContent = '一键复制'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, function () { fallback(text, done); });
+    } else { fallback(text, done); }
+  });
+});
+function fallback(text, done) {
+  var ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'absolute'; ta.style.left = '-9999px';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { alert('复制失败，请手动选中 URL'); }
+  document.body.removeChild(ta);
+}
+</script>
+</body>
+</html>
