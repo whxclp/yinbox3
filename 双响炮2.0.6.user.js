@@ -15287,15 +15287,7 @@
           '<div class="gm-dl-item-progress" data-merge-progress><span></span><em>等待操作</em></div></div>';
         showHTML = '<div style="margin:8px;padding:10px;border:1px solid #e6a23c;border-radius:6px;background:#fdf6ec;color:#8a5a00;">' + tipText + "</div>" + mergeBoxHtml + showHTML;
       }
-      // 本地文件合并工具：始终显示，用于合并已下载到电脑的分离视频/音频文件
-      const localMergeHtml =
-        '<div class="gm-merge-box"><div class="gm-merge-title">附：本地文件合并（把电脑上已下载的视频文件和音频文件合成完整 mp4）</div>' +
-        '<div class="gm-merge-row"><span>快捷选择</span><a href="javascript:;" data-local-both-btn>一次全选（视频+音频）</a><em style="font-style:normal;color:#666;font-size:0.85em;">自动识别哪个是视频、哪个是音频</em><input type="file" multiple accept="video/*,audio/*,.mp4,.m4v,.webm,.mkv,.flv,.ts,.m4a,.aac,.mp3,.ogg,.opus,.flac" data-local-both-input style="display:none;"></div>' +
-        '<div class="gm-merge-row"><span>视频文件</span><a href="javascript:;" data-local-video-btn>选择文件</a><em data-local-video-name style="font-style:normal;color:#666;font-size:0.85em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">未选择</em><input type="file" accept="video/*,.mp4,.m4v,.webm,.mkv,.flv,.ts" data-local-video-input style="display:none;"></div>' +
-        '<div class="gm-merge-row"><span>音频文件</span><a href="javascript:;" data-local-audio-btn>选择文件</a><em data-local-audio-name style="font-style:normal;color:#666;font-size:0.85em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">未选择</em><input type="file" accept="audio/*,.m4a,.aac,.mp3,.ogg,.opus,.flac,.mp4" data-local-audio-input style="display:none;"></div>' +
-        '<div class="gm-merge-row"><a href="javascript:;" data-local-merge-btn>合并并保存</a></div>' +
-        '<div class="gm-dl-item-progress" data-local-merge-progress><span></span><em>等待操作</em></div></div>';
-      showHTML = localMergeHtml + showHTML;
+
       let tsStatusHtml = "";
       // ts 分段合并下载：爱奇艺等站点没有 m3u8 列表、直接暴露 ts 分段直链，按抓取顺序（=播放顺序）拼接合成
       let tsMergeGroup = [];
@@ -15391,9 +15383,10 @@
         const __sw = this._sxpoAutoOn();
         const __hint = this._sxpoDetectHint();
         __tcBox = '<div style="margin:4px 8px 0;padding:6px 8px;background:#f0f7ff;border:1px solid #b3d8ff;border-radius:6px;color:#245;font-size:13px;">' + __prog +
-          "<div>共 " + sources.length + " 个" + __stat +
-          "｜<a href='javascript:;' data-tc-auto-sw style='color:#0055aa;' title='打开后：抓到分段即后台下载、抓全即自动合并，并同时开启换页禁止；关闭则纯观看，不自动下载'>合并下载：" + (__sw ? "开" : "关") + "</a>" +
-          "<span style='color:#8a93a2;'>　（换页禁止随合并自动开/关）</span></div>" +
+          "<div style='margin-top:6px;'>共 " + sources.length + " 个" + __stat + "</div>" +
+          "<div style='margin-top:6px;display:flex;align-items:center;gap:8px;'>" +
+          "<a href='javascript:;' data-tc-auto-sw style='padding:5px 14px;border-radius:6px;font-weight:700;font-size:13px;color:#fff;text-decoration:none;background:" + (__sw ? "#67c23a" : "#909399") + ";' title='打开后：抓到分段即后台下载、抓全即自动合并，并同时开启换页禁止；关闭则纯观看，不自动下载'>合并下载：" + (__sw ? "已开启" : "已关闭") + "（点击" + (__sw ? "关闭" : "开启") + "）</a>" +
+          "<span style='color:#8a93a2;font-size:12px;'>（换页禁止随合并自动开/关）</span></div>" +
           "<div data-sxpo-detect-hint style='margin-top:4px;color:" + (__hint.color || "#245") + ";" + (__hint.html ? "" : "display:none;") + "'>" + (__hint.html || "") + "</div></div>";
       } catch (eT) {}
       const titleText = (filter === "audio" ? "音频下载" : "视频下载") + " v" + __ver;
@@ -15582,68 +15575,7 @@
             });
         });
       } catch (eInsp) {}
-      let localVideoFile = null;
-      let localAudioFile = null;
-      const $localVideoInput = $dialog.$pops.querySelector("input[data-local-video-input]");
-      const $localAudioInput = $dialog.$pops.querySelector("input[data-local-audio-input]");
-      if ($localVideoInput)
-        $localVideoInput.addEventListener("change", () => {
-          localVideoFile = $localVideoInput.files && $localVideoInput.files[0] ? $localVideoInput.files[0] : null;
-          const $nameEl = $dialog.$pops.querySelector("[data-local-video-name]");
-          if ($nameEl) $nameEl.textContent = localVideoFile ? localVideoFile.name : "未选择";
-        });
-      if ($localAudioInput)
-        $localAudioInput.addEventListener("change", () => {
-          localAudioFile = $localAudioInput.files && $localAudioInput.files[0] ? $localAudioInput.files[0] : null;
-          const $nameEl = $dialog.$pops.querySelector("[data-local-audio-name]");
-          if ($nameEl) $nameEl.textContent = localAudioFile ? localAudioFile.name : "未选择";
-        });
-      // 一次全选：选中视频+音频两个文件，自动探测类型并填入对应槽位
-      const $localBothInput = $dialog.$pops.querySelector("input[data-local-both-input]");
-      const setLocalLabel = (kind, file) => {
-        const $el = $dialog.$pops.querySelector(kind === "video" ? "[data-local-video-name]" : "[data-local-audio-name]");
-        if ($el) $el.textContent = file ? file.name : "未选择";
-      };
-      const guessKindByName = (name) => {
-        const n = (name || "").toLowerCase();
-        if (/_audio|_音频|音频/.test(n) || /\.(m4a|aac|mp3|ogg|opus|flac|wav)$/.test(n)) return "audio";
-        if (/_video|_视频|视频/.test(n) || /\.(m4v|webm|mkv|flv|ts|mov)$/.test(n)) return "video";
-        return null;
-      };
-      const probeFileKind = async (file) => {
-        const MB = globalThis.Mediabunny;
-        if (MB && typeof MB.Input === "function") {
-          try {
-            const buf = await file.arrayBuffer();
-            const probeInput = new MB.Input({ source: new MB.BufferSource(new Uint8Array(buf)), formats: MB.ALL_FORMATS });
-            const vTrack = await probeInput.getPrimaryVideoTrack();
-            return vTrack ? "video" : "audio";
-          } catch (probeErr) { /* 探测失败则按文件名猜测 */ }
-        }
-        return guessKindByName(file.name);
-      };
-      if ($localBothInput)
-        $localBothInput.addEventListener("change", async () => {
-          const files = Array.from($localBothInput.files || []);
-          if (!files.length) return;
-          let vFile = null;
-          let aFile = null;
-          for (const f of files) {
-            const kind = await probeFileKind(f);
-            if (kind === "video" && !vFile) vFile = f;
-            else if (kind === "audio" && !aFile) aFile = f;
-          }
-          // 兜底：还有空槽位时用剩余文件补上（选反了 mergeLocalFiles 会自动交换重试）
-          if (!vFile || !aFile) {
-            const rest = files.filter((f) => f !== vFile && f !== aFile);
-            if (!vFile && rest.length) vFile = rest.shift();
-            if (!aFile && rest.length) aFile = rest.shift();
-          }
-          if (vFile) { localVideoFile = vFile; setLocalLabel("video", vFile); }
-          if (aFile) { localAudioFile = aFile; setLocalLabel("audio", aFile); }
-          if (vFile && aFile) qmsg.default.success("已识别 视频:「" + vFile.name + "」音频:「" + aFile.name + "」，点“合并并保存”开始");
-          else qmsg.default.warning("未能识别出视频/音频文件，请重新选择");
-        });
+
       $dialog.$pops.addEventListener("click", (evt) => {
         if (!(evt.target instanceof Element)) return;
         const $refresh = evt.target.closest("a[data-sxpo-refresh]");
@@ -15664,41 +15596,7 @@
           if (item) utils$1.copy(item.url).then(() => qmsg.default.success("已复制地址"));
           return;
         }
-        const $localBothBtn = evt.target.closest("a[data-local-both-btn]");
-        if ($localBothBtn && $dialog.$pops.contains($localBothBtn)) {
-          evt.preventDefault();
-          evt.stopPropagation();
-          if ($localBothInput) {
-            $localBothInput.value = "";
-            $localBothInput.click();
-          }
-          return;
-        }
-        const $localVideoBtn = evt.target.closest("a[data-local-video-btn]");
-        if ($localVideoBtn && $dialog.$pops.contains($localVideoBtn)) {
-          evt.preventDefault();
-          evt.stopPropagation();
-          if ($localVideoInput) $localVideoInput.click();
-          return;
-        }
-        const $localAudioBtn = evt.target.closest("a[data-local-audio-btn]");
-        if ($localAudioBtn && $dialog.$pops.contains($localAudioBtn)) {
-          evt.preventDefault();
-          evt.stopPropagation();
-          if ($localAudioInput) $localAudioInput.click();
-          return;
-        }
-        const $localMergeBtn = evt.target.closest("a[data-local-merge-btn]");
-        if ($localMergeBtn && $dialog.$pops.contains($localMergeBtn)) {
-          evt.preventDefault();
-          evt.stopPropagation();
-          if (!localVideoFile || !localAudioFile) {
-            qmsg.default.warning("请先分别选择视频文件和音频文件");
-            return;
-          }
-          this.mergeLocalFiles(localVideoFile, localAudioFile, $dialog.$pops.querySelector("[data-local-merge-progress]"));
-          return;
-        }
+
         const $mergeBtn = evt.target.closest("a[data-merge-btn]");
         if ($mergeBtn && $dialog.$pops.contains($mergeBtn)) {
           evt.preventDefault();
@@ -15737,7 +15635,10 @@
               try { this._sxpoSegAutoMergeTick(); } catch (eT) {}
             }
           } catch (eS) {}
-          $dialog.close();
+          // 不关闭面板：就地更新开关按钮状态，用户可继续操作
+          const __on = localStorage.getItem("sxpo_tc_auto") === "1";
+          $tcAutoSw.textContent = "合并下载：" + (__on ? "已开启" : "已关闭") + "（点击" + (__on ? "关闭" : "开启") + "）";
+          $tcAutoSw.style.background = __on ? "#67c23a" : "#909399";
           return;
         }
         const $tsClearBtn = evt.target.closest("a[data-ts-clear-btn]");
@@ -16022,7 +15923,7 @@
         // 解析分段与加密信息
         const lines = playlistText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
         if (lines.some((l) => l.startsWith("#EXT-X-MAP"))) {
-          throw new Error("该视频是 fMP4 分段格式（视频和音频分段已自动抓取），请直接用上方黄色的「分段合并下载」：分别合并视频组和音频组，再用「本地文件合并」合成");
+          throw new Error("该视频是 fMP4 分段格式（视频和音频分段已自动抓取），请直接用上方黄色的「分段合并下载」：分别合并视频组和音频组，再用桌面的【视频音频合并】工具合成");
         }
         let mediaSeq = 0;
         const seqMatch = /#EXT-X-MEDIA-SEQUENCE:(\d+)/.exec(playlistText);
@@ -17019,7 +16920,7 @@
         if (vN) {
           return {
             color: "#2a6",
-            html: "🎬 种类：<b>仅视频直链</b>（" + vN + " 条，未抓到独立音频流）　→ 直接点条目下载；要配声音可用上方「本地文件合并」"
+            html: "🎬 种类：<b>仅视频直链</b>（" + vN + " 条，未抓到独立音频流）　→ 直接点条目下载；要配声音可用桌面的【视频音频合并】工具"
           };
         }
         if (aN) {
@@ -17569,54 +17470,7 @@
         qmsg.default.error("DASH 下载失败：" + ((error && error.message) || error));
       }
     },
-    // 本地已下载的分离文件合并：选错位置会自动交换重试一次
-    async mergeLocalFiles(videoFile, audioFile, $progress) {
-      const setProgress = (percent, text) => {
-        if (!$progress) return;
-        const $bar = $progress.querySelector("span");
-        const $text = $progress.querySelector("em");
-        if ($bar && typeof percent === "number") $bar.style.width = Math.max(0, Math.min(100, percent)) + "%";
-        if ($text && text) $text.textContent = text;
-      };
-      if (this.$data.merging) {
-        qmsg.default.warning("已有合并任务进行中，请等待完成");
-        return;
-      }
-      this.$data.merging = true;
-      const finish = (percent, text) => {
-        setProgress(percent, text);
-        this.$data.merging = false;
-      };
-      try {
-        setProgress(10, "读取视频文件...");
-        const videoData = await videoFile.arrayBuffer();
-        setProgress(35, "读取音频文件...");
-        const audioData = await audioFile.arrayBuffer();
-        setProgress(55, "合并封装中...");
-        let mergedBuffer;
-        try {
-          mergedBuffer = await this.mergeMediaBuffers(videoData, audioData);
-        } catch (firstError) {
-          mergedBuffer = await this.mergeMediaBuffers(audioData, videoData);
-        }
-        const blob = new Blob([mergedBuffer], { type: "video/mp4" });
-        const blobUrl = URL.createObjectURL(blob);
-        const mergedName = (videoFile.name || "video").replace(/\.[^.]+$/, "") + "_merged.mp4";
-        const $a = document.createElement("a");
-        $a.href = blobUrl;
-        $a.download = mergedName;
-        document.body.appendChild($a);
-        $a.click();
-        $a.remove();
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 1e4);
-        finish(100, "合并完成，已开始下载");
-        qmsg.default.success("合并完成: " + mergedName);
-      } catch (error) {
-        log.error("本地文件合并失败", error);
-        finish(0, "合并失败");
-        qmsg.default.error("合并失败：" + ((error && error.message) || error));
-      }
-    },
+
     generateFileName(url, type) {
       // type 可能是真实扩展名（mp4/m4a...），也可能是兜底类别（video/audio），统一映射为真实扩展名
       const fallbackExt = { video: "mp4", audio: "m4a" }[type] || type || "mp4";
