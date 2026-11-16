@@ -2,7 +2,6 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>视频音频合并</title>
 <style>
 * { box-sizing: border-box; }
@@ -10,47 +9,50 @@
 html, body {
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  width: 440px;
+  max-width: 440px;
+  max-height: 580px;
+  overflow-y: auto;
   font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
   color: #222;
-  background: #eef1f5;
-}
-
-body {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 32px 16px;
-}
-
-.card {
-  width: 560px;
-  max-width: 100%;
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 12px 40px rgba(15, 23, 42, .12);
-  border: 1px solid #e5e7eb;
-  overflow: hidden;
 }
 
 .head {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 14px 16px;
-  border-bottom: 1px solid #eee;
-  background: #fff;
+  padding: 12px 14px 8px;
 }
 
-.head b { font-size: 16px; }
+.head b { font-size: 15px; }
 .head .sub { color: #98a2b3; font-size: 12px; }
 
-.body { padding: 14px 16px 16px; }
+.tabs {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 8px;
+  border-bottom: 1px solid #eee;
+  flex-wrap: wrap;
+}
+.tab {
+  padding: 5px 10px;
+  border-radius: 6px;
+  background: #f2f4f7;
+  color: #475467;
+  cursor: pointer;
+  font-size: 12px;
+  border: 1px solid #e4e7ec;
+}
+.tab:hover { background: #e9edf3; }
+.tab.on { background: #2f6bff; border-color: #2f6bff; color: #fff; font-weight: 600; }
+
+.body { padding: 12px 14px 14px; }
 
 .drop {
   border: 1.5px dashed #c7cdd6;
   border-radius: 8px;
-  padding: 16px 10px;
+  padding: 12px 10px;
   text-align: center;
   color: #8a93a2;
   font-size: 13px;
@@ -59,7 +61,52 @@ body {
 }
 .drop.over { border-color: #2f6bff; color: #2f6bff; background: #f2f6ff; }
 
-.row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.list { margin-bottom: 10px; }
+.empty { color: #b0b7c3; font-size: 12px; text-align: center; padding: 8px 0; }
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.item .idx {
+  flex: 0 0 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  background: #eef2f7;
+  border-radius: 4px;
+  color: #475467;
+  font-size: 12px;
+}
+.item .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #344054;
+}
+.item .size { flex: 0 0 auto; color: #98a2b3; font-size: 12px; }
+.mini {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  text-align: center;
+  border-radius: 4px;
+  background: #f2f4f7;
+  color: #475467;
+  cursor: pointer;
+  font-size: 13px;
+}
+.mini:hover { background: #e4e7ec; }
+
+.row { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
 .label { flex: 0 0 62px; color: #667085; font-size: 13px; }
 .name {
   flex: 1;
@@ -100,17 +147,29 @@ body {
 
 .tip { margin-top: 10px; font-size: 12px; color: #98a2b3; line-height: 1.6; }
 
+.check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #667085;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.check input { margin: 2px 0 0; }
+
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 40px;
+  bottom: 16px;
   transform: translateX(-50%);
   background: rgba(17, 24, 39, .92);
   color: #fff;
   padding: 9px 16px;
   border-radius: 8px;
   font-size: 13px;
-  max-width: 80vw;
+  max-width: 90vw;
   box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
   opacity: 0;
   pointer-events: none;
@@ -124,44 +183,71 @@ body {
 </style>
 </head>
 <body>
-  <div class="card">
-    <div class="head">
-      <b>视频音频合并</b>
-      <span class="sub">本地文件合成完整 mp4，不联网、不上传</span>
-    </div>
-    <div class="body">
-      <div class="drop" data-drop>把视频 / 音频文件拖到这里（自动识别）</div>
+  <div class="head">
+    <b>视频音频合并</b>
+    <span class="sub">本地文件合成 · 纯本地处理</span>
+  </div>
 
+  <div class="tabs">
+    <a class="tab on" data-tab="video">① 视频小段合并</a>
+    <a class="tab" data-tab="audio">② 音频小段合并</a>
+    <a class="tab" data-tab="av">③ 音频视频合并</a>
+  </div>
+
+  <div class="body">
+    <div class="mode" data-mode="video">
+      <div class="drop" data-drop="video">把视频小段拖到这里（可多选，按顺序拼接）</div>
+      <div class="list" data-list="video"></div>
+      <div class="row">
+        <a class="btn" data-add="video">添加视频文件</a>
+        <a class="btn" data-clear="video">清空</a>
+        <input type="file" data-input="video" multiple accept="video/*,.mp4,.m4v,.webm,.mkv,.flv,.ts,.mov" hidden>
+      </div>
+      <div class="row">
+        <a class="btn primary" data-merge="video">合并视频小段</a>
+      </div>
+      <label class="check"><input type="checkbox" data-tc="video"> 转码统一（编码/分辨率不一致也能合并，较慢）</label>
+    </div>
+
+    <div class="mode" data-mode="audio" style="display:none">
+      <div class="drop" data-drop="audio">把音频小段拖到这里（可多选，按顺序拼接）</div>
+      <div class="list" data-list="audio"></div>
+      <div class="row">
+        <a class="btn" data-add="audio">添加音频文件</a>
+        <a class="btn" data-clear="audio">清空</a>
+        <input type="file" data-input="audio" multiple accept="audio/*,.m4a,.aac,.mp3,.ogg,.oga,.opus,.flac,.wav,.wma" hidden>
+      </div>
+      <div class="row">
+        <a class="btn primary" data-merge="audio">合并音频小段</a>
+      </div>
+      <label class="check"><input type="checkbox" data-tc="audio"> 转码统一（编码/采样率不一致也能合并，较慢）</label>
+    </div>
+
+    <div class="mode" data-mode="av" style="display:none">
       <div class="row">
         <span class="label">视频文件</span>
         <a class="btn" data-vbtn>选择文件</a>
         <span class="name" data-vname>未选择</span>
         <input type="file" data-vinput accept="video/*,.mp4,.m4v,.webm,.mkv,.flv,.ts,.mov" hidden>
       </div>
-
       <div class="row">
         <span class="label">音频文件</span>
         <a class="btn" data-abtn>选择文件</a>
         <span class="name" data-aname>未选择</span>
-        <input type="file" data-ainput accept="audio/*,.m4a,.aac,.mp3,.ogg,.opus,.flac,.wav" hidden>
+        <input type="file" data-ainput accept="audio/*,.m4a,.aac,.mp3,.ogg,.oga,.opus,.flac,.wav,.wma" hidden>
       </div>
-
       <div class="row">
-        <a class="btn" data-both>一次全选（视频+音频）</a>
-        <input type="file" data-bothinput multiple accept="video/*,audio/*,.mp4,.m4v,.webm,.mkv,.flv,.ts,.mov,.m4a,.aac,.mp3,.ogg,.opus,.flac,.wav" hidden>
+        <a class="btn primary" data-merge="av">合并并保存</a>
       </div>
-
-      <div class="row">
-        <a class="btn primary" data-merge>合并并保存</a>
-      </div>
-
-      <div class="progress">
-        <div class="bar"><i data-bar></i></div>
-        <em data-text>等待操作</em>
-      </div>
-
-      <div class="tip">纯本地合成，文件不离开电脑；支持 mp4 / mkv / ts / flv / webm / m4a / mp3 等常见格式。</div>
+      <label class="check"><input type="checkbox" data-tc="av"> 转码统一（视频统一 H.264、音频统一 AAC）</label>
     </div>
+
+    <div class="progress">
+      <div class="bar"><i data-bar></i></div>
+      <em data-text>等待操作</em>
+    </div>
+
+    <div class="tip">纯本地合成，文件不离开电脑。①/② 把多个同类型小段按顺序拼成一个文件；③ 把一个视频和一个音频合成完整 mp4。勾选「转码统一」或检测到参数不一致时会自动转码（需支持 WebCodecs 的浏览器）。</div>
   </div>
 
   <div class="toast" data-toast></div>
@@ -237,42 +323,46 @@ mediabunny/dist/modules/src/index.js:
 */
 
 
-  </script>
+</script>
   <script>
-/* 视频音频合并 —— 独立 HTML 工具（双击即用）
- * 纯本地合成：视频文件 + 音频文件 -> 完整 mp4（不转码，保留 B 帧）
- * 依赖上方内联的 Mediabunny 组件（纯 JS 音视频封装库）
+/* 视频音频合并 —— 浏览器扩展弹窗逻辑
+ * 三种模式：① 视频小段合并 ② 音频小段合并 ③ 音频视频合并
+ * 纯本地合成（不转码），依赖同目录下的 mediabunny.js
  */
 (function () {
   "use strict";
 
   var MB = globalThis.Mediabunny;
-  var $toast = document.querySelector("[data-toast]");
-  function toast(msg, type) {
-    if (!$toast) return;
-    $toast.textContent = msg;
-    $toast.className = "toast show" + (type ? " " + type : "");
-    setTimeout(function () { $toast.className = "toast"; }, 3200);
-  }
   if (!MB || typeof MB.Input !== "function") {
-    toast("合并组件加载失败，请重新打开本文件", "err");
+    document.body.innerHTML = '<div style="padding:20px;color:#b42318">合并组件加载失败，请重新加载扩展。</div>';
     return;
   }
 
   var $ = function (sel) { return document.querySelector(sel); };
 
-  var $drop = $("[data-drop]");
-  var $vname = $("[data-vname]");
-  var $aname = $("[data-aname]");
   var $bar = $("[data-bar]");
   var $text = $("[data-text]");
+  var $toast = $("[data-toast]");
 
-  var videoFile = null;
-  var audioFile = null;
+  var state = { mode: "video", video: [], audio: [], avVideo: null, avAudio: null, tc: { video: false, audio: false, av: false } };
   var merging = false;
   var toastTimer = null;
 
-  function showToast(msg, type) {
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"]/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+    });
+  }
+
+  function fmtSize(n) {
+    if (!n && n !== 0) return "";
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n / 1048576).toFixed(1) + " MB";
+    return (n / 1073741824).toFixed(2) + " GB";
+  }
+
+  function toast(msg, type) {
     if (!$toast) return;
     $toast.textContent = msg;
     $toast.className = "toast show" + (type ? " " + type : "");
@@ -285,53 +375,479 @@ mediabunny/dist/modules/src/index.js:
     if ($text && text) $text.textContent = text;
   }
 
-  function setLabel(kind, file) {
-    var el = kind === "video" ? $vname : $aname;
-    if (!el) return;
-    el.textContent = file ? file.name : "未选择";
-    el.title = file ? file.name : "";
+  function switchMode(mode) {
+    state.mode = mode;
+    Array.prototype.forEach.call(document.querySelectorAll("[data-tab]"), function (el) {
+      el.classList.toggle("on", el.getAttribute("data-tab") === mode);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-mode]"), function (el) {
+      el.style.display = el.getAttribute("data-mode") === mode ? "" : "none";
+    });
   }
 
-  function guessKindByName(name) {
-    var n = (name || "").toLowerCase();
-    if (/_audio|_音频|音频/.test(n) || /\.(m4a|aac|mp3|ogg|oga|opus|flac|wav|wma)$/.test(n)) return "audio";
-    if (/_video|_视频|视频/.test(n) || /\.(m4v|webm|mkv|flv|ts|mov|avi)$/.test(n)) return "video";
-    return null;
+  function renderList(kind) {
+    var box = document.querySelector('[data-list="' + kind + '"]');
+    if (!box) return;
+    var list = kind === "video" ? state.video : state.audio;
+    if (!list.length) { box.innerHTML = '<div class="empty">暂无文件，点「添加」或拖进来</div>'; return; }
+    box.innerHTML = list.map(function (f, i) {
+      return '<div class="item"><span class="idx">' + (i + 1) + "</span>" +
+        '<span class="name" title="' + esc(f.name) + '">' + esc(f.name) + "</span>" +
+        '<span class="size">' + fmtSize(f.size) + "</span>" +
+        '<a class="mini" data-act="up" data-kind="' + kind + '" data-i="' + i + '" title="上移">↑</a>' +
+        '<a class="mini" data-act="down" data-kind="' + kind + '" data-i="' + i + '" title="下移">↓</a>' +
+        '<a class="mini" data-act="del" data-kind="' + kind + '" data-i="' + i + '" title="移除">×</a></div>';
+    }).join("");
   }
 
-  async function probeFileKind(file) {
-    try {
-      var buf = await file.arrayBuffer();
-      var input = new MB.Input({ source: new MB.BufferSource(new Uint8Array(buf)), formats: MB.ALL_FORMATS });
-      var vTrack = await input.getPrimaryVideoTrack();
-      return vTrack ? "video" : "audio";
-    } catch (e) {
-      return guessKindByName(file.name);
+  function addFiles(kind, files) {
+    var list = Array.prototype.slice.call(files || []).filter(Boolean);
+    if (!list.length) return;
+    var target = kind === "video" ? state.video : state.audio;
+    list.forEach(function (f) { target.push(f); });
+    renderList(kind);
+    toast("已添加 " + list.length + " 个" + (kind === "video" ? "视频" : "音频") + "文件，共 " + target.length + " 段");
+  }
+
+  function setAvLabel(kind, file) {
+    var el = kind === "video" ? $("[data-vname]") : $("[data-aname]");
+    if (el) { el.textContent = file ? file.name : "未选择"; el.title = file ? file.name : ""; }
+  }
+
+  async function readTrack(file, kind) {
+    var buf = new Uint8Array(await file.arrayBuffer());
+    var input = new MB.Input({ source: new MB.BufferSource(buf), formats: MB.ALL_FORMATS });
+    var track = kind === "video" ? await input.getPrimaryVideoTrack() : await input.getPrimaryAudioTrack();
+    return { input: input, track: track };
+  }
+
+  // 同类型多段拼接：逐文件取轨，时间戳接龙写入同一输出（不转码，保留 B 帧）
+  async function concatSameKind(files, kind, onStep) {
+    var label = kind === "video" ? "画面" : "声音";
+    var output = null, source = null, codec = null, decCfg = null;
+    var next = 0, added = 0;
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      if (onStep) onStep(5 + Math.round(55 * i / files.length), "解析第 " + (i + 1) + "/" + files.length + " 段：" + f.name);
+      var info = null;
+      try {
+        info = await readTrack(f, kind);
+        if (!info.track) throw new Error("第 " + (i + 1) + " 段里没有找到" + label + "轨道：" + f.name);
+        if (!codec) {
+          codec = info.track.codec;
+          decCfg = await info.track.getDecoderConfig();
+          output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }), target: new MB.BufferTarget() });
+          source = kind === "video" ? new MB.EncodedVideoPacketSource(codec) : new MB.EncodedAudioPacketSource(codec);
+          if (kind === "video") output.addVideoTrack(source); else output.addAudioTrack(source);
+          await output.start();
+        } else if (String(info.track.codec) !== String(codec)) {
+          throw new Error("第 " + (i + 1) + " 段编码不同（" + info.track.codec + " ≠ " + codec + "），无法直接拼接");
+        }
+        var pkts = [];
+        for await (var pkt of new MB.EncodedPacketSink(info.track).packets()) pkts.push(pkt);
+        if (pkts.length) {
+          var base = Infinity;
+          for (var k = 0; k < pkts.length; k++) if (pkts[k].timestamp < base) base = pkts[k].timestamp;
+          var shift = next - base;
+          for (var j = 0; j < pkts.length; j++) {
+            pkts[j].timestamp += shift;
+            await source.add(pkts[j], added === 0 && decCfg ? { decoderConfig: decCfg } : undefined);
+            added++;
+            var end = pkts[j].timestamp + (pkts[j].duration || 0);
+            if (end > next) next = end;
+          }
+        }
+      } finally {
+        if (info && info.input && typeof info.input.dispose === "function") { try { info.input.dispose(); } catch (eD) {} }
+      }
     }
+    if (!codec) throw new Error("没有可用的" + label + "内容");
+    if (onStep) onStep(80, "封装输出中...");
+    await output.finalize();
+    return output.target.buffer;
   }
 
-  // 纯 JS 转封装合并：视频 + 音频 -> 完整 mp4
+  // ===== 转码统一（WebCodecs）：把不同编码/分辨率/帧率的小段统一后再合并 =====
+  function wcOK() {
+    return typeof VideoEncoder === "function" && typeof VideoDecoder === "function"
+      && typeof AudioEncoder === "function" && typeof AudioDecoder === "function";
+  }
+
+  // 探测每段的编码/分辨率/帧率/采样率（用于判断是否需要转码）
+  async function probeSpecs(files, kind) {
+    const list = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const rec = { file: f, codec: "", width: 0, height: 0, fps: 0, sampleRate: 0, channels: 0, ok: false };
+      let info = null;
+      try {
+        info = await readTrack(f, kind);
+        const t = info.track;
+        rec.codec = String((t && t.codec) || "");
+        let cfg = null;
+        try { cfg = await t.getDecoderConfig(); } catch (eC) {}
+        if (cfg) {
+          rec.width = cfg.codedWidth || 0;
+          rec.height = cfg.codedHeight || 0;
+          rec.sampleRate = cfg.sampleRate || 0;
+          rec.channels = cfg.numberOfChannels || 0;
+          rec.ok = true;
+          if (kind === "video") {
+            try {
+              let n = 0, first = Infinity, last = -Infinity;
+              for await (const p of new MB.EncodedPacketSink(t).packets()) {
+                n++;
+                if (p.timestamp < first) first = p.timestamp;
+                const end = p.timestamp + (p.duration || 0);
+                if (end > last) last = end;
+              }
+              if (n > 1 && last > first) rec.fps = Math.round(((n - 1) / (last - first)) * 10) / 10;
+            } catch (eF) {}
+          }
+        }
+      } catch (eP) {}
+      if (info && info.input && typeof info.input.dispose === "function") { try { info.input.dispose(); } catch (eD) {} }
+      list.push(rec);
+    }
+    return list;
+  }
+
+  function specsUniform(list, kind) {
+    if (list.length < 2) return true;
+    const a = list[0];
+    if (!a.ok) return false;
+    return list.every((b) => b.ok && (kind === "video"
+      ? (b.codec === a.codec && b.width === a.width && b.height === a.height)
+      : (b.codec === a.codec && b.sampleRate === a.sampleRate && b.channels === a.channels)));
+  }
+
+  // 音频重采样（线性插值）到目标采样率
+  function resampleAudioData(ad, targetRate) {
+    var inRate = ad.sampleRate;
+    var ch = ad.numberOfChannels;
+    var n = ad.numberOfFrames;
+    if (!n) return ad;
+    var ratio = inRate / targetRate;
+    var outLen = Math.max(1, Math.round(n / ratio));
+    var planes = [];
+    for (var c = 0; c < ch; c++) {
+      var src = new Float32Array(n);
+      ad.copyTo(src, { planeIndex: c });
+      var dst = new Float32Array(outLen);
+      for (var i = 0; i < outLen; i++) {
+        var pos = i * ratio;
+        var i0 = Math.floor(pos);
+        if (i0 >= n) i0 = n - 1;
+        var frac = pos - i0;
+        var i1 = Math.min(i0 + 1, n - 1);
+        dst[i] = src[i0] * (1 - frac) + src[i1] * frac;
+      }
+      planes.push(dst);
+    }
+    var inter = new Float32Array(outLen * ch);
+    for (var i2 = 0; i2 < outLen; i2++) for (var c2 = 0; c2 < ch; c2++) inter[i2 * ch + c2] = planes[c2][i2];
+    return new AudioData({ data: inter, format: "f32", sampleRate: targetRate, numberOfFrames: outLen, numberOfChannels: ch, timestamp: ad.timestamp, duration: ad.duration });
+  }
+
+  // 声道数对齐（1<->多声道）
+  function mixAudioChannels(ad, targetCh) {
+    var ch = ad.numberOfChannels;
+    if (ch === targetCh) return ad;
+    var n = ad.numberOfFrames;
+    var planes = [];
+    for (var c = 0; c < ch; c++) { var p = new Float32Array(n); ad.copyTo(p, { planeIndex: c }); planes.push(p); }
+    var out = new Float32Array(n * targetCh);
+    for (var i = 0; i < n; i++) {
+      for (var c2 = 0; c2 < targetCh; c2++) {
+        if (targetCh === 1) out[i] = ((planes[0][i] || 0) + (planes[1] ? planes[1][i] : (planes[0][i] || 0))) / 2;
+        else if (ch === 1) out[i * targetCh + c2] = planes[0][i];
+        else out[i * targetCh + c2] = planes[Math.min(c2, ch - 1)][i];
+      }
+    }
+    return new AudioData({ data: out, format: "f32", sampleRate: ad.sampleRate, numberOfFrames: n, numberOfChannels: targetCh, timestamp: ad.timestamp, duration: ad.duration });
+  }
+
+  // 单文件转码 -> packet 列表（timestamp 从 0 开始按目标帧率/时长重排）
+  async function transcodeToPackets(file, kind, target, onStep, label) {
+    const buf = new Uint8Array(await file.arrayBuffer());
+    const input = new MB.Input({ source: new MB.BufferSource(buf), formats: MB.ALL_FORMATS });
+    const track = kind === "video" ? await input.getPrimaryVideoTrack() : await input.getPrimaryAudioTrack();
+    if (!track) { if (input.dispose) input.dispose(); throw new Error(label + "里没有找到" + (kind === "video" ? "画面" : "声音") + "轨道：" + file.name); }
+    const decCfg = await track.getDecoderConfig();
+    const chunks = [];
+    let desc = null;
+    let enc = null, dec = null, decErr = null;
+    if (kind === "video") {
+      enc = new VideoEncoder({
+        output: function (ch, meta) {
+          if (!desc && meta && meta.decoderConfig && meta.decoderConfig.description) desc = meta.decoderConfig.description;
+          chunks.push(ch);
+        },
+        error: function (e) { decErr = e; }
+      });
+      enc.configure({ codec: target.wcCodec, width: target.width, height: target.height, bitrate: target.bitrate || 1500000, framerate: target.fps || 25 });
+      let frameNo = 0;
+      dec = new VideoDecoder({
+        output: function (fr) {
+          let vf = fr;
+          if (fr.codedWidth !== target.width || fr.codedHeight !== target.height) {
+            const c = new OffscreenCanvas(target.width, target.height);
+            const ctx = c.getContext("2d");
+            ctx.drawImage(fr, 0, 0, target.width, target.height);
+            vf = new VideoFrame(c, { timestamp: fr.timestamp, duration: fr.duration });
+          }
+          try { enc.encode(vf, { keyFrame: (frameNo % Math.max(1, Math.round(target.fps || 25) * 2)) === 0 }); } catch (eE) { decErr = eE; }
+          frameNo++;
+          if (vf !== fr) vf.close();
+          fr.close();
+        },
+        error: function (e) { decErr = e; }
+      });
+      dec.configure({ codec: decCfg.codec, codedWidth: decCfg.codedWidth, codedHeight: decCfg.codedHeight, description: decCfg.description || undefined });
+    } else {
+      enc = new AudioEncoder({
+        output: function (ch, meta) {
+          if (!desc && meta && meta.decoderConfig && meta.decoderConfig.description) desc = meta.decoderConfig.description;
+          chunks.push(ch);
+        },
+        error: function (e) { decErr = e; }
+      });
+      enc.configure({ codec: target.wcCodec, sampleRate: target.sampleRate, numberOfChannels: target.channels, bitrate: target.bitrate || 128000 });
+      dec = new AudioDecoder({
+        output: function (ad) {
+          var cur = ad;
+          try {
+            if (ad.sampleRate !== target.sampleRate) {
+              cur = resampleAudioData(ad, target.sampleRate);
+            }
+            if (cur.numberOfChannels !== target.channels) {
+              var mixed = mixAudioChannels(cur, target.channels);
+              if (mixed !== cur) {
+                if (cur !== ad) { try { cur.close(); } catch (e1) {} }
+                cur = mixed;
+              }
+            }
+            enc.encode(cur);
+          } catch (eE) {
+            decErr = eE;
+          } finally {
+            if (cur !== ad) { try { cur.close(); } catch (e2) {} }
+            try { ad.close(); } catch (e3) {}
+          }
+        },
+        error: function (e) { decErr = e; }
+      });
+      dec.configure({ codec: decCfg.codec, sampleRate: decCfg.sampleRate, numberOfChannels: decCfg.numberOfChannels, description: decCfg.description || undefined });
+    }
+    let proto = null;
+    for await (const pkt of new MB.EncodedPacketSink(track).packets()) {
+      if (!proto) proto = pkt.constructor;
+      const ChunkCtor = kind === "video" ? EncodedVideoChunk : EncodedAudioChunk;
+      dec.decode(new ChunkCtor({ type: pkt.type === "key" ? "key" : "delta", timestamp: pkt.timestamp, duration: pkt.duration, data: pkt.data }));
+    }
+    await dec.flush();
+    dec.close();
+    if (decErr) throw decErr;
+    await enc.flush();
+    enc.close();
+    if (input.dispose) input.dispose();
+    const step = kind === "video" ? (1 / (target.fps || 25)) : 0;
+    let ts = 0;
+    const out = [];
+    for (let i = 0; i < chunks.length; i++) {
+      const ch = chunks[i];
+      const u8 = new Uint8Array(ch.byteLength);
+      ch.copyTo(u8);
+      const dur = kind === "video" ? step : ((ch.duration != null ? ch.duration / 1e6 : 0) || 0);
+      out.push({ data: u8, type: ch.type === "key" ? "key" : "delta", timestamp: ts, duration: dur });
+      ts += dur;
+    }
+    return { packets: out, desc: desc, proto: proto };
+  }
+
+  // 视频多段转码统一后拼接
+  async function transcodeVideoConcat(files, target, onStep) {
+    const output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }), target: new MB.BufferTarget() });
+    const source = new MB.EncodedVideoPacketSource("avc");
+    output.addVideoTrack(source);
+    await output.start();
+    let added = 0, next = 0, proto = null, desc = null;
+    for (let i = 0; i < files.length; i++) {
+      if (onStep) onStep(5 + Math.round(60 * i / files.length), "转码第 " + (i + 1) + "/" + files.length + " 段：" + files[i].name);
+      const r = await transcodeToPackets(files[i], "video", target, null, "第 " + (i + 1) + " 段");
+      if (!proto) proto = r.proto;
+      if (!desc) desc = r.desc;
+      for (const p of r.packets) {
+        const np = new proto(p.data, p.type, next, p.duration);
+        await source.add(np, added === 0 && desc ? { decoderConfig: { codec: target.wcCodec, description: desc, codedWidth: target.width, codedHeight: target.height } } : undefined);
+        added++;
+        next += p.duration;
+      }
+    }
+    if (onStep) onStep(85, "封装输出中...");
+    await output.finalize();
+    return output.target.buffer;
+  }
+
+  // 音频多段转码统一后拼接（要求采样率/声道一致，否则交给调用方回退）
+  async function transcodeAudioConcat(files, target, onStep) {
+    const output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }), target: new MB.BufferTarget() });
+    const source = new MB.EncodedAudioPacketSource("aac");
+    output.addAudioTrack(source);
+    await output.start();
+    let added = 0, next = 0, proto = null, desc = null;
+    for (let i = 0; i < files.length; i++) {
+      if (onStep) onStep(5 + Math.round(60 * i / files.length), "转码第 " + (i + 1) + "/" + files.length + " 段：" + files[i].name);
+      const r = await transcodeToPackets(files[i], "audio", target, null, "第 " + (i + 1) + " 段");
+      if (!proto) proto = r.proto;
+      if (!desc) desc = r.desc;
+      for (const p of r.packets) {
+        const np = new proto(p.data, p.type, next, p.duration);
+        await source.add(np, added === 0 && desc ? { decoderConfig: { codec: target.wcCodec, description: desc, sampleRate: target.sampleRate, numberOfChannels: target.channels } } : undefined);
+        added++;
+        next += p.duration;
+      }
+    }
+    if (onStep) onStep(85, "封装输出中...");
+    await output.finalize();
+    return output.target.buffer;
+  }
+
+  // 视频 + 音频：各自转码统一后再合成（视频统一为 avc，音频统一为 aac）
+  async function transcodeAvMerge(videoFile, audioFile, onStep) {
+    const vInfo = (await probeSpecs([videoFile], "video"))[0];
+    const aInfo = (await probeSpecs([audioFile], "audio"))[0];
+    const vTarget = { wcCodec: "avc1.42E01E", width: vInfo.width || 640, height: vInfo.height || 480, fps: vInfo.fps || 25, bitrate: 1500000 };
+    const aTarget = { wcCodec: "mp4a.40.2", sampleRate: aInfo.sampleRate || 48000, channels: aInfo.channels || 2, bitrate: 128000 };
+    if (onStep) onStep(5, "转码视频中...");
+    const vRes = await transcodeToPackets(videoFile, "video", vTarget, null, "视频");
+    if (onStep) onStep(50, "转码音频中...");
+    const aRes = await transcodeToPackets(audioFile, "audio", aTarget, null, "音频");
+    if (onStep) onStep(75, "合成封装中...");
+    const output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }), target: new MB.BufferTarget() });
+    const vSource = new MB.EncodedVideoPacketSource("avc");
+    output.addVideoTrack(vSource);
+    const aSource = new MB.EncodedAudioPacketSource("aac");
+    output.addAudioTrack(aSource);
+    await output.start();
+    let vNext = 0, aNext = 0;
+    for (const p of vRes.packets) {
+      await vSource.add(new vRes.proto(p.data, p.type, vNext, p.duration), vNext === 0 && vRes.desc ? { decoderConfig: { codec: vTarget.wcCodec, description: vRes.desc, codedWidth: vTarget.width, codedHeight: vTarget.height } } : undefined);
+      vNext += p.duration;
+    }
+    for (const p of aRes.packets) {
+      await aSource.add(new aRes.proto(p.data, p.type, aNext, p.duration), aNext === 0 && aRes.desc ? { decoderConfig: { codec: aTarget.wcCodec, description: aRes.desc, sampleRate: aTarget.sampleRate, numberOfChannels: aTarget.channels } } : undefined);
+      aNext += p.duration;
+    }
+    await output.finalize();
+    return output.target.buffer;
+  }
+
+  // ===== ffmpeg.wasm 回退：WebCodecs 不可用 / 需要重采样（采样率不一致）时启用 =====
+  var ffmpegInst = null;
+  var ffmpegPromise = null;
+  var ffmpegLib = null;
+
+  function loadFFmpeg() {
+    if (ffmpegInst) return Promise.resolve(ffmpegInst);
+    if (ffmpegPromise) return ffmpegPromise;
+    if (!globalThis.crossOriginIsolated) {
+      return Promise.reject(new Error("当前页面未启用跨域隔离，ffmpeg.wasm 回退不可用；转码统一需要支持 WebCodecs 的浏览器（Chrome / Edge）"));
+    }
+    ffmpegPromise = new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = "https://unpkg.com/@ffmpeg/ffmpeg@0.10.1/dist/ffmpeg.min.js";
+      s.onload = function () {
+        try {
+          var lib = globalThis.FFmpegWASM || globalThis.FFmpeg;
+          ffmpegLib = lib;
+          var inst = null;
+          if (lib && typeof lib.createFFmpeg === "function") inst = lib.createFFmpeg({ log: false, corePath: "https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js" });
+          else if (lib && typeof lib.FFmpeg === "function") inst = new lib.FFmpeg({ log: false, corePath: "https://unpkg.com/@ffmpeg/core@0.10.0/dist/ffmpeg-core.js" });
+          if (!inst || typeof inst.load !== "function") { reject(new Error("ffmpeg.wasm 组件加载失败")); return; }
+          inst.load().then(function () { ffmpegInst = inst; resolve(inst); }, function (e) { reject(e || new Error("ffmpeg.wasm 核心加载失败")); });
+        } catch (e) { reject(e); }
+      };
+      s.onerror = function () { reject(new Error("ffmpeg.wasm 下载失败（需联网，或改用 WebCodecs）")); };
+      document.head.appendChild(s);
+    });
+    return ffmpegPromise;
+  }
+
+  function ffmpegRead(inst, name) {
+    try { return inst.FS("readFile", name).buffer; } catch (e) { return null; }
+  }
+
+  function ffmpegFetchFile(inst, file) {
+    var fetcher = null;
+    if (inst && typeof inst.fetchFile === "function") fetcher = inst;
+    else if (ffmpegLib && typeof ffmpegLib.fetchFile === "function") fetcher = ffmpegLib;
+    if (!fetcher) throw new Error("ffmpeg 缺少 fetchFile");
+    return fetcher.fetchFile(file);
+  }
+
+  async function ffmpegTranscodeAudio(file, target, tag) {
+    var inst = await loadFFmpeg();
+    var inName = "in" + tag + ".bin";
+    var outName = "out" + tag + ".m4a";
+    inst.FS("writeFile", inName, await ffmpegFetchFile(inst, file));
+    await inst.run("-i", inName, "-vn", "-map", "0:a:0", "-ar", String(target.sampleRate || 48000), "-ac", String(target.channels || 2), "-c:a", "aac", "-b:a", "128k", outName);
+    var buf = ffmpegRead(inst, outName);
+    try { inst.FS("unlink", inName); } catch (e) {}
+    try { inst.FS("unlink", outName); } catch (e) {}
+    if (!buf) throw new Error("ffmpeg 音频转码无输出");
+    return new Uint8Array(buf);
+  }
+
+  async function ffmpegTranscodeVideo(file, target, tag) {
+    var inst = await loadFFmpeg();
+    var inName = "vin" + tag + ".bin";
+    var outName = "vout" + tag + ".mp4";
+    inst.FS("writeFile", inName, await ffmpegFetchFile(inst, file));
+    await inst.run("-y", "-i", inName, "-an", "-vf", "scale=" + (target.width || 640) + ":" + (target.height || 480), "-r", String(target.fps || 25), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", outName);
+    var buf = ffmpegRead(inst, outName);
+    try { inst.FS("unlink", inName); } catch (e) {}
+    try { inst.FS("unlink", outName); } catch (e) {}
+    if (!buf) throw new Error("ffmpeg 视频转码无输出");
+    return new Uint8Array(buf);
+  }
+
+  async function transcodeAudioConcatFFmpeg(files, target, onStep) {
+    var list = [];
+    for (var i = 0; i < files.length; i++) {
+      if (onStep) onStep(5 + Math.round(60 * i / files.length), "ffmpeg 转码第 " + (i + 1) + "/" + files.length + " 段：" + files[i].name);
+      var u8 = await ffmpegTranscodeAudio(files[i], target, "a" + i);
+      list.push(new File([u8], baseName(files[i].name) + "_u" + i + ".m4a", { type: "audio/mp4" }));
+    }
+    return concatSameKind(list, "audio", onStep);
+  }
+
+  async function transcodeVideoConcatFFmpeg(files, target, onStep) {
+    var list = [];
+    for (var i = 0; i < files.length; i++) {
+      if (onStep) onStep(5 + Math.round(60 * i / files.length), "ffmpeg 转码第 " + (i + 1) + "/" + files.length + " 段：" + files[i].name);
+      var u8 = await ffmpegTranscodeVideo(files[i], target, "v" + i);
+      list.push(new File([u8], baseName(files[i].name) + "_u" + i + ".mp4", { type: "video/mp4" }));
+    }
+    return concatSameKind(list, "video", onStep);
+  }
+
+  // 视频 + 音频 -> 完整 mp4（不转码）
   async function mergeMediaBuffers(videoData, audioData) {
     var vInput = new MB.Input({ source: new MB.BufferSource(videoData), formats: MB.ALL_FORMATS });
     var vTrack = await vInput.getPrimaryVideoTrack();
     if (!vTrack) throw new Error("视频文件里没有找到画面轨道");
     var vDecCfg = await vTrack.getDecoderConfig();
-
     var aInput = new MB.Input({ source: new MB.BufferSource(audioData), formats: MB.ALL_FORMATS });
     var aTrack = await aInput.getPrimaryAudioTrack();
     if (!aTrack) throw new Error("音频文件里没有找到声音轨道");
     var aDecCfg = await aTrack.getDecoderConfig();
-
-    var output = new MB.Output({
-      format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }),
-      target: new MB.BufferTarget()
-    });
+    var output = new MB.Output({ format: new MB.Mp4OutputFormat({ fastStart: "in-memory" }), target: new MB.BufferTarget() });
     var vSource = new MB.EncodedVideoPacketSource(vTrack.codec);
     output.addVideoTrack(vSource);
     var aSource = new MB.EncodedAudioPacketSource(aTrack.codec);
     output.addAudioTrack(aSource);
     await output.start();
-
     var i = 0;
     for await (var packet of new MB.EncodedPacketSink(vTrack).packets()) {
       await vSource.add(packet, i === 0 ? { decoderConfig: vDecCfg } : undefined);
@@ -342,102 +858,175 @@ mediabunny/dist/modules/src/index.js:
       await aSource.add(packet, i === 0 ? { decoderConfig: aDecCfg } : undefined);
       i++;
     }
-
     await output.finalize();
     return output.target.buffer;
   }
 
-  function handleFiles(files) {
-    var list = Array.prototype.slice.call(files || []).filter(Boolean);
-    if (!list.length) return;
-    var p = Promise.resolve();
-    list.forEach(function (f) {
-      p = p.then(async function () {
-        var kind = await probeFileKind(f);
-        if (kind === "video" && !videoFile) { videoFile = f; setLabel("video", f); }
-        else if (kind === "audio" && !audioFile) { audioFile = f; setLabel("audio", f); }
-      });
-    });
-    p.then(function () {
-      if (videoFile && audioFile) {
-        showToast("已识别 视频:「" + videoFile.name + "」 音频:「" + audioFile.name + "」");
-      } else if (!videoFile) {
-        showToast("没有识别出视频文件，请再选择一个视频", "warn");
-      } else {
-        showToast("没有识别出音频文件，请再选择一个音频", "warn");
-      }
-    });
+  function saveBlob(buf, name, mime) {
+    var blob = new Blob([buf], { type: mime || "video/mp4" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+  }
+
+  function baseName(name) {
+    return String(name || "file").replace(/\.[^.]+$/, "");
+  }
+
+  async function pickTranscode(files, kind, forced) {
+    if (forced) return { yes: true, reason: "已开启「转码统一」" };
+    if (!wcOK()) return { yes: false, reason: "" };
+    var specs = await probeSpecs(files, kind);
+    if (specs.length < 2) return { yes: false, reason: "" };
+    if (specsUniform(specs, kind)) return { yes: false, reason: "" };
+    return { yes: true, reason: "检测到各段" + (kind === "video" ? "分辨率/帧率" : "编码/采样率") + "不一致，自动转码统一" };
+  }
+
+  function targetFromSpecs(specs, kind) {
+    var s = specs[0] || {};
+    if (kind === "video") return { wcCodec: "avc1.42E01E", width: s.width || 640, height: s.height || 480, fps: s.fps || 25, bitrate: 1500000 };
+    return { wcCodec: "mp4a.40.2", sampleRate: s.sampleRate || 48000, channels: s.channels || 2, bitrate: 128000 };
   }
 
   async function doMerge() {
-    if (merging) { showToast("已有合并任务进行中，请等待完成", "warn"); return; }
-    if (!videoFile || !audioFile) { showToast("请先选择视频文件和音频文件", "warn"); return; }
-    if (videoFile === audioFile) { showToast("视频和音频不能是同一个文件", "warn"); return; }
-
+    if (merging) { toast("已有合并任务进行中，请等待完成", "warn"); return; }
+    var mode = state.mode;
+    if (mode === "video" && !state.video.length) { toast("请先添加视频小段", "warn"); return; }
+    if (mode === "audio" && !state.audio.length) { toast("请先添加音频小段", "warn"); return; }
+    if (mode === "av" && (!state.avVideo || !state.avAudio)) { toast("请先选择视频文件和音频文件", "warn"); return; }
     merging = true;
     try {
-      setProgress(10, "读取视频文件...");
-      var vData = new Uint8Array(await videoFile.arrayBuffer());
-      setProgress(35, "读取音频文件...");
-      var aData = new Uint8Array(await audioFile.arrayBuffer());
-      setProgress(55, "合并封装中...");
-
-      var merged;
-      try {
-        merged = await mergeMediaBuffers(vData, aData);
-      } catch (firstError) {
-        // 选反了（把音频当成了视频）时自动交换重试
-        merged = await mergeMediaBuffers(aData, vData);
+      setProgress(5, "读取文件中...");
+      if (mode === "video") {
+        var plan = await pickTranscode(state.video, "video", state.tc.video);
+        var vbuf;
+        if (plan.yes) {
+          if (plan.reason) toast(plan.reason + "，转码较慢请稍候");
+          var specsV = await probeSpecs(state.video, "video");
+          if (wcOK()) vbuf = await transcodeVideoConcat(state.video, targetFromSpecs(specsV, "video"), setProgress);
+          else vbuf = await transcodeVideoConcatFFmpeg(state.video, targetFromSpecs(specsV, "video"), setProgress);
+        } else {
+          vbuf = await concatSameKind(state.video, "video", setProgress);
+        }
+        setProgress(100, "合并完成，已开始下载");
+        saveBlob(vbuf, "视频合并_" + state.video.length + "段.mp4", "video/mp4");
+        toast("视频小段合并完成");
+      } else if (mode === "audio") {
+        var planA = await pickTranscode(state.audio, "audio", state.tc.audio);
+        var abuf;
+        if (planA.yes) {
+          if (planA.reason) toast(planA.reason + "，转码较慢请稍候");
+          var specsA = await probeSpecs(state.audio, "audio");
+          if (wcOK()) abuf = await transcodeAudioConcat(state.audio, targetFromSpecs(specsA, "audio"), setProgress);
+          else abuf = await transcodeAudioConcatFFmpeg(state.audio, targetFromSpecs(specsA, "audio"), setProgress);
+        } else {
+          abuf = await concatSameKind(state.audio, "audio", setProgress);
+        }
+        setProgress(100, "合并完成，已开始下载");
+        saveBlob(abuf, "音频合并_" + state.audio.length + "段.m4a", "audio/mp4");
+        toast("音频小段合并完成");
+      } else {
+        var vData = new Uint8Array(await state.avVideo.arrayBuffer());
+        var aData = new Uint8Array(await state.avAudio.arrayBuffer());
+        setProgress(50, "合并封装中...");
+        var merged;
+        if (state.tc.av) {
+          toast("已开启「转码统一」，转码较慢请稍候");
+          merged = await transcodeAvMerge(state.avVideo, state.avAudio, setProgress);
+        } else {
+          try { merged = await mergeMediaBuffers(vData, aData); }
+          catch (firstError) { merged = await mergeMediaBuffers(aData, vData); }
+        }
+        setProgress(100, "合并完成，已开始下载");
+        saveBlob(merged, baseName(state.avVideo.name) + "_合并.mp4", "video/mp4");
+        toast("合并完成：" + baseName(state.avVideo.name) + "_合并.mp4");
       }
-
-      var blob = new Blob([merged], { type: "video/mp4" });
-      var url = URL.createObjectURL(blob);
-      var name = (videoFile.name || "video").replace(/\.[^.]+$/, "") + "_merged.mp4";
-      var a = document.createElement("a");
-      a.href = url;
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
-
-      setProgress(100, "合并完成，已开始下载");
-      showToast("合并完成：" + name);
     } catch (error) {
       setProgress(0, "合并失败");
-      showToast("合并失败：" + ((error && error.message) || error), "err");
+      toast("合并失败：" + ((error && error.message) || error), "err");
     } finally {
       merging = false;
     }
   }
 
-  // ---- 事件绑定 ----
-  $("[data-vbtn]").addEventListener("click", function () { $("[data-vinput]").click(); });
-  $("[data-abtn]").addEventListener("click", function () { $("[data-ainput]").click(); });
-  $("[data-both]").addEventListener("click", function () { $("[data-bothinput]").click(); });
-  $("[data-merge]").addEventListener("click", doMerge);
+  // ---- 事件 ----
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var tab = t.closest("[data-tab]");
+    if (tab) { switchMode(tab.getAttribute("data-tab")); return; }
+    var add = t.closest("[data-add]");
+    if (add) { var inp = document.querySelector('[data-input="' + add.getAttribute("data-add") + '"]'); if (inp) inp.click(); return; }
+    var clear = t.closest("[data-clear]");
+    if (clear) {
+      var ck = clear.getAttribute("data-clear");
+      if (ck === "video") state.video = []; else state.audio = [];
+      renderList(ck);
+      return;
+    }
+    var merge = t.closest("[data-merge]");
+    if (merge) { doMerge(); return; }
+    if (t.closest("[data-vbtn]")) { var vi = $("[data-vinput]"); if (vi) vi.click(); return; }
+    if (t.closest("[data-abtn]")) { var ai = $("[data-ainput]"); if (ai) ai.click(); return; }
+    var act = t.closest("[data-act]");
+    if (act) {
+      var kind = act.getAttribute("data-kind");
+      var idx = parseInt(act.getAttribute("data-i"), 10);
+      var list = kind === "video" ? state.video : state.audio;
+      var a = act.getAttribute("data-act");
+      if (a === "del") { list.splice(idx, 1); }
+      else if (a === "up" && idx > 0) { var tmp = list[idx - 1]; list[idx - 1] = list[idx]; list[idx] = tmp; }
+      else if (a === "down" && idx < list.length - 1) { var tmp2 = list[idx + 1]; list[idx + 1] = list[idx]; list[idx] = tmp2; }
+      renderList(kind);
+    }
+  });
 
-  $("[data-vinput]").addEventListener("change", function (e) {
-    videoFile = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-    setLabel("video", videoFile);
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var tck = t.getAttribute("data-tc");
+    if (tck) { state.tc[tck] = !!t.checked; return; }
+    var kind = t.getAttribute("data-input");
+    if (kind) { addFiles(kind, t.files); return; }
+    if (t.hasAttribute("data-vinput")) {
+      state.avVideo = t.files && t.files[0] ? t.files[0] : null;
+      setAvLabel("video", state.avVideo);
+      return;
+    }
+    if (t.hasAttribute("data-ainput")) {
+      state.avAudio = t.files && t.files[0] ? t.files[0] : null;
+      setAvLabel("audio", state.avAudio);
+    }
   });
-  $("[data-ainput]").addEventListener("change", function (e) {
-    audioFile = e.target.files && e.target.files[0] ? e.target.files[0] : null;
-    setLabel("audio", audioFile);
-  });
-  $("[data-bothinput]").addEventListener("change", function (e) { handleFiles(e.target.files); });
 
   ["dragenter", "dragover"].forEach(function (evt) {
-    document.body.addEventListener(evt, function (e) { e.preventDefault(); $drop.classList.add("over"); });
+    document.body.addEventListener(evt, function (e) {
+      var drop = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+      if (drop) { e.preventDefault(); drop.classList.add("over"); }
+    });
   });
   ["dragleave", "drop"].forEach(function (evt) {
-    document.body.addEventListener(evt, function (e) { e.preventDefault(); $drop.classList.remove("over"); });
+    document.body.addEventListener(evt, function (e) {
+      var drop = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+      if (drop) { e.preventDefault(); drop.classList.remove("over"); }
+    });
   });
   document.body.addEventListener("drop", function (e) {
-    handleFiles(e.dataTransfer && e.dataTransfer.files);
+    var drop = e.target && e.target.closest ? e.target.closest("[data-drop]") : null;
+    if (!drop) return;
+    addFiles(drop.getAttribute("data-drop"), e.dataTransfer && e.dataTransfer.files);
   });
+
+  renderList("video");
+  renderList("audio");
+  switchMode("video");
 })();
 
-  </script>
+</script>
 </body>
 </html>
