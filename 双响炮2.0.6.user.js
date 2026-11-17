@@ -14300,6 +14300,16 @@
           hover: "#fff",
           text: "",
           square: true
+        },
+        {
+          host: /(^|\.)haokan\.baidu\.com$/i,
+          bar: ".art-controls-right",
+          ref: ".art-control",
+          cls: "art-control",
+          anchor: ".art-control-fullscreen",
+          hover: "#fff",
+          text: "双响炮",
+          square: false
         }
       ];
       const siteCfg = () => {
@@ -14400,7 +14410,7 @@
         if (cs.position === "static") box.style.position = "relative";
         btn.style.cssText = [
           "position:absolute",
-          "top:8px",
+          "bottom:8px",
           "right:8px",
           "z-index:2147483646",
           "display:inline-flex",
@@ -14597,6 +14607,15 @@
     },
     checkVideoUrl(url, response, initiatorType, rangeInfo) {
       if (!url || typeof url !== "string") return;
+      // 好看视频：页面会预加载推荐视频，其流 URL 带 vid 参数；只收与当前页面 vid 一致的流，避免“下载到非正主”
+      if (location.hostname === "haokan.baidu.com") {
+        const curVid = new URLSearchParams(location.search).get("vid");
+        if (curVid) {
+          let urlVid = "";
+          try { urlVid = new URL(url, location.href).searchParams.get("vid") || ""; } catch (eV) {}
+          if (urlVid && urlVid !== curVid) return;
+        }
+      }
       const urlLower = url.toLowerCase();
       let contentType = "";
       try {
@@ -16876,7 +16895,12 @@
         const st = this._sxpoCaptureStatus(__tsN);
         return st.complete ? "✅ 已抓全，可以合并" : "⏳ 未抓全（" + st.text + "）";
       }
-      if (__hasV) return "⏳ 未齐：还缺音频流";
+      if (__hasV) {
+        // 只有一条 mp4 直链时，很可能是自带音轨的整文件（如好看视频），不能断言“缺音频”
+        const __single = items.filter((s) => s.mediaType === "video" && String(s.type || "").toLowerCase() === "mp4");
+        if (items.length === 1 && __single.length === 1) return "🎬 单条视频流（此类 mp4 通常自带声音，下载后请试听）";
+        return "⏳ 未齐：还缺音频流";
+      }
       if (__hasA) return "⏳ 未齐：还缺视频流";
       return "✅ 已齐";
     },
@@ -16920,7 +16944,7 @@
         if (vN) {
           return {
             color: "#2a6",
-            html: "🎬 种类：<b>仅视频直链</b>（" + vN + " 条，未抓到独立音频流）　→ 直接点条目下载；要配声音可用桌面的【视频音频合并】工具"
+            html: "🎬 种类：<b>仅视频直链</b>（" + vN + " 条，未发现独立音频流；此类 mp4 多数自带声音，下载后请先试听）　→ 直接点条目下载；若下载后无声，可刷新页面重播几秒再开面板重试"
           };
         }
         if (aN) {
