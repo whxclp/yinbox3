@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         新实力·录制增强版
 // @namespace    local.qnyh.qidian
-// @version      0.9.4-rec
-// @description  新实力视频下载：新页面只先分类不动作，等用户选择；换页/换集清空旧页捕获保障内容纯正；开开关才抓；必须真实听完到片尾才允许合并；抖音页只亮③直链解析其余全灰，分段嗅探/缓存/面板重计算全部豁免。
+// @version      1.2.5
+// @description  新实力视频下载+录制正式版：⑦一键直下（B站贴BV号/链接→官方API取mp4单文件；抖音页自动解析当前视频无水印原画质→均直接存桌面，最快最稳，绕开抓段/录屏/合并）；①-⑤下载功能原样保留（⑤分段合并默认折叠，非B站站点仍可用）；⑥录制重大升级——标签页录屏、区域框选不压暗、录制条自动吸附播放器控制条、👁隐藏/Alt+H恢复/Alt+R停止、整段总时长倒计时到0自动停、固定存浏览器默认下载目录(桌面)、录完音量恢复原样。下载侧：新页面只先分类不动作等用户选择；换页/换集清空旧页捕获保障内容纯正；开开关才抓；必须真实听完到片尾才允许合并；抖音页分段嗅探/缓存/面板重计算全部豁免；音盒本地页(127.0.0.1:8093)整页豁免只留⑥录制；⑦B站/抖音(含图文笔记N张图)直下带真实字节进度条；⤓悬浮按钮默认停靠屏幕右上角（只露8px把手，鼠标碰即滑出，右键切换停靠/自由）。
 // @license      GPL-3.0-only
+// 有意省略说明（非漏写，勿补）：@match/@include 省略＝全站注入，本脚本靠内部 HOST 判断在爱奇艺/腾讯/抖音等多站亮功能，写了会锁死站点；@run-at 省略＝内部已用 DOMContentLoaded+readyState 自己处理注入时机，start/end 都兼容；@connect 省略＝视频直链来自海量 CDN 节点无法枚举，不写 GM_xmlhttpRequest 才能访问任意 CDN，写了 CDN 一换下载即废。通用脚本检查器报"缺这四项"属误报。
 // 本地加固版口径：不设 @updateURL / @downloadURL，版本更新一律以手动粘贴到暴力猴编辑器为准，避免旧更新源回滚
 // @grant        GM_xmlhttpRequest
 // @grant        GM_download
@@ -23,7 +24,7 @@
   const _GMxhr = (typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest : null);
   const _GM_download = (typeof GM_download === "function" ? GM_download : null);
   const _GMinfo = (typeof GM_info !== "undefined" ? GM_info : null);
-  const VERSION = (_GMinfo && _GMinfo.script && _GMinfo.script.version) || "0.9.3";
+  const VERSION = (_GMinfo && _GMinfo.script && _GMinfo.script.version) || "1.0.0";
 
   // 页面加载第一时间：下载开关默认关，清掉旧版持久化状态
   try { localStorage.setItem("qidian_auto", "0"); } catch (e) {}
@@ -31,6 +32,9 @@
   const HOST = location.hostname;
   const isQy = /(^|\.)iqiyi\.com$/i.test(HOST);
   const isTencent = /(^|\.)qq\.com$/i.test(HOST) || /tencentvideo/i.test(HOST);
+  const isBili = /(^|\.)bilibili\.com$/i.test(HOST) || /bilibili/i.test(HOST);
+  // 片尾容差：B站给 1.5 秒（够防跳集抢跑，又不会提前几秒锁停导致歌没播完）；其他站点 0.3
+  const endTolerance = () => (isBili ? 1.5 : 0.3);
 
   // ===== 内存状态（刷新后全部重建，不跨页面继承） =====
   const state = {
@@ -78,6 +82,29 @@
   const MIN_KEEP_RATIO = 0.5;
   const LEDGER_KEY = "qidian_ep_ledger_v1";
   const LEDGER_TTL = 30 * 864e5;
+
+  // ===== 分组已下载标记（按内容时间段做 key，跨刷新不丢；下载完在组按钮后标"已下载 ✓"，不弹提示语） =====
+  const GD_KEY = "qidian_group_done_v1";
+  function groupDoneAll() {
+    try { const a = JSON.parse(localStorage.getItem(GD_KEY) || "[]"); return Array.isArray(a) ? a : []; }
+    catch (e) { return []; }
+  }
+  function groupDoneKey(g) {
+    if (!g) return "";
+    if (g.posMin >= 0 && g.posMax >= 0) return fmtPos(g.posMin) + "-" + fmtPos(g.posMax) + "|" + (g.n || 0);
+    return "g" + (g.n || 0);
+  }
+  function groupIsDone(g) {
+    const k = groupDoneKey(g); if (!k) return false;
+    try { return groupDoneAll().indexOf(k) >= 0; } catch (e) { return false; }
+  }
+  function markGroupDone(g) {
+    const k = groupDoneKey(g); if (!k) return;
+    try {
+      const a = groupDoneAll();
+      if (a.indexOf(k) < 0) { a.push(k); localStorage.setItem(GD_KEY, JSON.stringify(a.slice(-80))); }
+    } catch (e) {}
+  }
 
   // ===== 下载台账：同一集重复下载前先问一次（本地 30 天、最多 30 条） =====
   function ledgerAll() {
@@ -235,7 +262,7 @@
 
   // 开关：纯观看默认关；开=抓到分段后台固化、抓全后出合并按钮
   function autoOn() {
-    try { return localStorage.getItem("qidian_auto") === "1"; } catch (e) { return false; }
+    try { if (isYinhe()) return false; return localStorage.getItem("qidian_auto") === "1"; } catch (e) { return false; }
   }
   function setAutoOn(on) {
     try { localStorage.setItem("qidian_auto", on ? "1" : "0"); } catch (e) {}
@@ -421,6 +448,8 @@
   // ===== 消息提示（不依赖外部库，自造极简浮层） =====
   let msgTimer = null;
   function toast(text, kind) {
+    // 提示一律正常显示，不再因录制状态静默（用户敲定：合并/下载/错误提示必须可见，
+    // 否则录制状态一旦残留，所有反馈被吞，表现为"点合并没反应"）
     try {
       let box = document.getElementById("qidian-toast");
       if (!box) {
@@ -434,6 +463,22 @@
       clearTimeout(msgTimer);
       msgTimer = setTimeout(() => { try { box.remove(); } catch (e) {} }, 4000);
     } catch (e) {}
+  }
+  // 【强制错误提示】不受任何静默开关影响，合并失败必须让用户看见原因（否则表现为"点了没反应"）
+  function showFatal(text) {
+    try {
+      let b = document.getElementById("qidian-fatal");
+      if (!b) {
+        b = document.createElement("div");
+        b.id = "qidian-fatal";
+        b.style.cssText = "position:fixed;left:50%;top:16px;transform:translateX(-50%);z-index:2147483647;max-width:86%;padding:12px 18px;border-radius:10px;font:13px/1.6 sans-serif;color:#fff;background:rgba(180,40,40,.96);box-shadow:0 6px 24px rgba(0,0,0,.4);white-space:pre-wrap;word-break:break-all;";
+        document.body.appendChild(b);
+      }
+      b.textContent = "⚠ " + text;
+      clearTimeout(b.__t);
+      b.__t = setTimeout(() => { try { b.remove(); } catch (e) {} }, 12000);
+    } catch (e) { console.error("[新实力] FATAL", text); }
+    console.error("[新实力] FATAL", text);
   }
 
   // 暴露调试探针（挂到页面 window，控制台可直接读）
@@ -544,6 +589,55 @@
     return { start, end };
   }
 
+  // 【通用直抓 · 修「分段不增长」】B站新版 DASH 走无后缀 fetch/XHR 分片（vid=...&orderid=0,3 这类），
+  // 不再经过 MSE appendBuffer。旧逻辑只在 sniffUrl 里登记 URL、字节依赖预下重拉，签名一过期就 0KB、
+  // 分段数永远停在那几条。这里在响应到达的当下 clone 字节，验证是 fMP4/TS 分片后直接进 segBytesCache
+  // 并标 savedAt——合并时 fetchSeg() 命中缓存即可，不必再网络重拉；归档也会认 savedAt 把段固化进组。
+  function directCaptureFromResponse(responseUrl, range, ct, u8) {
+    try {
+      if (!autoOn() || isDouyin()) return;
+      if (!u8 || !u8.byteLength || !segBytesValid(u8)) return;
+      if (isInitSegBytes(u8)) return;   // init 由专门逻辑存 groupInit，不占分片名额
+      const r = parseRange(range, responseUrl);
+      const audioHint = /audio/i.test(String(ct || "")) || /[-_./]audio[-_.\d]/i.test(responseUrl);
+      const mediaType = audioHint ? "audio" : "video";
+      let rec = state.videoUrlMap.get(responseUrl);
+      if (!rec) {
+        addSource(responseUrl, {
+          mediaType: mediaType, type: mediaType === "audio" ? "audio" : "m4s",
+          source: "network / direct / " + (ct || "binary"),
+          rangeStart: r.start, rangeEnd: r.end, seg: true,
+        });
+        rec = state.videoUrlMap.get(responseUrl);
+      }
+      if (!rec) return;
+      if (audioHint && rec.mediaType !== "audio") rec.mediaType = "audio";
+      if (rec.rangeStart == null && r.start != null) rec.rangeStart = r.start;
+      if (rec.rangeEnd == null && r.end != null) rec.rangeEnd = r.end;
+      if (!rec.seg) rec.seg = true;
+      const k = segKey(rec.url, rec);
+      cacheSeg(k, u8);
+      rec.savedAt = Date.now();
+      state.directCapCount = (state.directCapCount || 0) + 1;
+      log.info("✓ 直抓分片 " + Math.round(u8.byteLength / 1024) + "KB [" + mediaType + "] #" + state.directCapCount, String(rec.url).slice(-55));
+    } catch (e) { log.warn("直抓分片异常:", e && e.message); }
+  }
+  // XHR 响应字节：ArrayBuffer / ArrayBufferView 同步取；Blob 用 FileReader 异步取
+  function xhrBytes(xhr) {
+    try {
+      const r = xhr.response;
+      if (r instanceof ArrayBuffer) return new Uint8Array(r);
+      if (ArrayBuffer.isView(r)) return new Uint8Array(r.buffer, r.byteOffset, r.byteLength);
+      if (typeof Blob !== "undefined" && r instanceof Blob) {
+        return new Promise((resolve) => {
+          try { const fr = new FileReader(); fr.onload = () => resolve(new Uint8Array(fr.result)); fr.onerror = () => resolve(null); fr.readAsArrayBuffer(r); }
+          catch (e) { resolve(null); }
+        });
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function hookFetch() {
     if (state.fetchHooked || typeof _unsafe.fetch !== "function") return;
     state.fetchHooked = true;
@@ -570,6 +664,39 @@
             let ctF = "";
             try { ctF = String((response.headers && response.headers.get && response.headers.get("content-type")) || ""); } catch (e) {}
             sniffUrl(responseUrl, range, ctF, "video");
+            // 【B站 init 直抓】init 段字节必须在抓取当下存下来——合并时重新拉常因签名过期失败导致缺 moov。
+            // URL 含 init 的 .m4s（B站 DASH init），clone 读字节，验证 ftyp+moov 直接存 groupInit。
+            try {
+              const isInitUrl = /(^|[\/._-])init([._-](mp4|m4s|ts))?([?#]|$)/i.test(responseUrl) || /\.m4s(\?|#|$)/i.test(responseUrl);
+              if (isInitUrl && response.clone) {
+                const wantVideo = !/audio/i.test(ctF) && !/[-_./]audio[-_.\d]/i.test(responseUrl);
+                const slot = wantVideo ? "video" : "audio";
+                if (!state.groupInit[slot]) {
+                  response.clone().arrayBuffer().then((ab) => {
+                    try {
+                      const u8 = new Uint8Array(ab);
+                      if (isInitSegBytes(u8) && !state.groupInit[slot]) {
+                        state.groupInit[slot] = u8;
+                        log.info("✓ fetch 直抓 " + slot + " init 段（" + u8.byteLength + " 字节）:", responseUrl.slice(-55));
+                      }
+                    } catch (e) {}
+                  }).catch(() => {});
+                }
+              }
+            } catch (eInitFetch) {}
+            // 【通用直抓】B站无后缀 DASH 分片当下存字节（不经 MSE、不靠签名重拉）
+            try {
+              if (autoOn() && !isDouyin()) {
+                const mediaish = /^video\/|^audio\/|octet-stream|mp2t|mpegurl|dash\+xml/i.test(ctF) ||
+                  /\.(m4s|mp4|ts|265ts|flv|m4v|webm|aac|mp3|m4a|opus|m3u8|mpd)(\?|#|$)/i.test(responseUrl) ||
+                  /[?&]start=\d+|orderid=|init/i.test(responseUrl);
+                if (mediaish && response.clone) {
+                  response.clone().arrayBuffer().then((ab) => {
+                    directCaptureFromResponse(responseUrl, range, ctF, new Uint8Array(ab));
+                  }).catch(() => {});
+                }
+              }
+            } catch (eDirectFetch) {}
             // 爱奇艺片名：JSON 响应异步解析；抖音 aweme 数据捕获
             if (isQy && !/\.(ts|m4s|mp4|m3u8|mpd|m4a|mp3)(\?|#|$)/i.test(responseUrl)) {
               let ct = "";
@@ -611,6 +738,35 @@
           let ctX = "";
           try { ctX = typeof xhr.getResponseHeader === "function" ? String(xhr.getResponseHeader("content-type") || "") : ""; } catch (e) {}
           sniffUrl(responseUrl, range, ctX, "video");
+          // 【B站 init 直抓】XHR 通道同理：init 段字节当场存，避免合并时重拉签名过期
+          try {
+            const isInitUrl = /(^|[\/._-])init([._-](mp4|m4s|ts))?([?#]|$)/i.test(responseUrl) || /\.m4s(\?|#|$)/i.test(responseUrl);
+            if (isInitUrl && xhr.response && xhr.response.byteLength) {
+              const wantVideo = !/audio/i.test(ctX) && !/[-_./]audio[-_.\d]/i.test(responseUrl);
+              const slot = wantVideo ? "video" : "audio";
+              if (!state.groupInit[slot]) {
+                const u8 = xhr.response instanceof ArrayBuffer ? new Uint8Array(xhr.response)
+                  : (ArrayBuffer.isView(xhr.response) ? new Uint8Array(xhr.response.buffer, xhr.response.byteOffset, xhr.response.byteLength) : null);
+                if (u8 && isInitSegBytes(u8)) {
+                  state.groupInit[slot] = u8;
+                  log.info("✓ XHR 直抓 " + slot + " init 段（" + u8.byteLength + " 字节）:", responseUrl.slice(-55));
+                }
+              }
+            }
+          } catch (eInitXhr) {}
+          // 【通用直抓】XHR 通道同理：无后缀 DASH 分片字节当场存，避免预下重拉签名过期
+          try {
+            if (autoOn() && !isDouyin()) {
+              const mediaish = /^video\/|^audio\/|octet-stream|mp2t|mpegurl|dash\+xml/i.test(ctX) ||
+                /\.(m4s|mp4|ts|265ts|flv|m4v|webm|aac|mp3|m4a|opus|m3u8|mpd)(\?|#|$)/i.test(responseUrl) ||
+                /[?&]start=\d+|orderid=|init/i.test(responseUrl);
+              if (mediaish) {
+                const ub = xhrBytes(xhr);
+                if (ub && typeof ub.then === "function") ub.then((u8) => { if (u8) directCaptureFromResponse(responseUrl, range, ctX, u8); });
+                else if (ub) directCaptureFromResponse(responseUrl, range, ctX, ub);
+              }
+            }
+          } catch (eDirectXhr) {}
           if (isQy && !/\.(ts|m4s|mp4|m3u8|mpd|m4a|mp3)(\?|#|$)/i.test(responseUrl)) {
             let t = "";
             try { t = !xhr.responseType || xhr.responseType === "text" ? xhr.responseText : ""; } catch (e) {}
@@ -650,32 +806,33 @@
       const originAppend = sb.appendBuffer;
       sb.appendBuffer = function (buffer) {
         try {
-          // 抖音/直播走直链解析路线：MSE 喂流不做捕获缓存，避免分片字节堆积内存、干扰抖音下载
-          if (isDouyin()) return originAppend.apply(this, arguments);
+          // 抖音/直播/音盒走直链或本地路线：MSE 喂流不做捕获缓存，避免分片字节堆积内存
+          if (isDouyin() || isYinhe()) return originAppend.apply(this, arguments);
+          let u8 = null;
+          if (buffer instanceof ArrayBuffer) u8 = new Uint8Array(buffer);
+          else if (ArrayBuffer.isView(buffer)) u8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+          // 【init 无条件抢抓 · 关键修复】init（ftyp+moov）每个轨只在播放器初始化时 append 一次，
+          // 用户打开页面时下载开关还没开，若按开关跳过就永远错过——之后从头播放只有 moof 媒体分片，合并必缺 moov。
+          // 因此 init 提取必须放在 autoOn() 判断之前、无条件执行；init 每个轨只存一次，内存开销可忽略。
+          if (u8 && u8.byteLength && !state.groupInit[kind]) {
+            try {
+              const init = extractInitPrefix(u8);
+              if (init && init.length > 16) {
+                state.groupInit[kind] = new Uint8Array(init);
+                log.info("已从 MSE 首块提取 " + kind + " init 段（" + init.length + " 字节），合并时自动注入");
+              }
+            } catch (eInit) {}
+          }
           // 未开下载开关：只做探测计数供分类判定（⑤点亮），不取字节、不缓存、不登记——先分类，等待用户选择后再抓
           if (!autoOn()) {
             state.mseProbeCount = (state.mseProbeCount || 0) + 1;
             return originAppend.apply(this, arguments);
           }
-          let u8 = null;
-          if (buffer instanceof ArrayBuffer) u8 = new Uint8Array(buffer);
-          else if (ArrayBuffer.isView(buffer)) u8 = new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
           if (u8 && u8.byteLength) {
             const segNo = ++state.mseSeq;
             track.seq = segNo;
             const copy = new Uint8Array(u8);
             track.buffers.push(copy);
-            // init 段提取：MSE 轨道的第一块字节天然以 init（ftyp+moov）开头——按轨存入 groupInit，
-            // 供嗅探/归档的纯媒体段（moof）合并时通过 initInput 注入（爱奇艺 init 命名不规范，URL 正则识别不到，字节级提取通吃）
-            try {
-              if (!state.groupInit[kind]) {
-                const init = extractInitPrefix(copy);
-                if (init && init.length > 16) {
-                  state.groupInit[kind] = new Uint8Array(init);
-                  log.info("已从 MSE 首块提取 " + kind + " init 段（" + init.length + " 字节），合并时自动注入");
-                }
-              }
-            } catch (eInit) {}
             // 进字节缓存：稳定键用 MSE 轨道 + 序号；直入台账记录（分段、字节已在手）
             const k = "mse|" + kind + "|" + segNo;
             cacheSeg(k, copy);
@@ -744,12 +901,12 @@
       try {
         if (state.__endedAt) return;
         // 抖音短视频为整段直链，不走分段抓取/合并，不锁播放器、不拦换页
-        if (isDouyin() || isLiveDouyin()) { log.info(src + " 抖音直链页，跳过分段抓全锁定"); return; }
+        if (isDouyin() || isLiveDouyin() || isYinhe()) { log.info(src + " 直链/本地页，跳过分段抓全锁定"); return; }
         const dur0 = isFinite(v.duration) ? v.duration : 0;
-        const minInc = Math.max(60, dur0 * 0.6);
-        // 只认"真正播到底"：必须 currentTime 到达片尾（零差值，仅留浮点最小容差），不提前抢任何一秒；
-        // force：loop 回跳兜底（时间已倒退=本轮已播完），跳过 nearEnd 但仍要求真实听满
-        const nearEnd = dur0 > 5 && v.currentTime >= dur0 - 0.01;
+        // B站片尾有推荐/倒计时，进度到不了最后一帧就跳集，累计门槛和片尾容差都放宽；其他站点口径不变
+        const minInc = isBili ? Math.max(20, dur0 * 0.35) : Math.max(60, dur0 * 0.6);
+        // 只认"真正播到底"：currentTime 到达片尾容差内；B站留 6 秒（跨过片尾推荐），其他站点仍近零差值
+        const nearEnd = dur0 > 5 && v.currentTime >= dur0 - endTolerance();
         if (accumInc < minInc || (!nearEnd && !force)) {
           log.info(src + " 未验证听完（递增 " + Math.round(accumInc) + "s，需 " + Math.round(minInc) + "s），跳过");
           return;
@@ -775,13 +932,14 @@
         const cur = isFinite(v.currentTime) ? v.currentTime : 0;
         // loop 回跳兜底：上一采样还在片尾附近、这一采样突然倒退 = 播放器自动重播了
         // （ended 被 loop 吞掉的铁证）——真实听满全程即兜底标记抓全，抢在播放器跳转清数据之前
-        if (lastCur >= 0 && cur < lastCur - 1 && dur > 5 && lastCur >= dur - 2 && accumInc >= Math.max(60, dur * 0.6)) {
+        const incNeed = isBili ? Math.max(20, dur * 0.35) : Math.max(60, dur * 0.6);
+        if (lastCur >= 0 && cur < lastCur - 1 && dur > 5 && lastCur >= dur - endTolerance() && accumInc >= incNeed) {
           markEnded("loop-回跳兜底", true);
         }
         if (lastCur >= 0 && cur > lastCur && cur - lastCur < 30) accumInc += (cur - lastCur);
         lastCur = cur;
-        // 0.3 秒内进入验证，零差值在 markEnded 内部把关
-        if (dur > 5 && cur >= dur - 0.3) markEnded("timeupdate");
+        // B站留 6 秒容差（片尾推荐会提前跳集）；其他站点仍 0.3 秒，零差值在 markEnded 内部把关
+        if (dur > 5 && cur >= dur - endTolerance()) markEnded("timeupdate");
       } catch (e) {}
     }, true);
     v.addEventListener("pause", () => {
@@ -789,7 +947,7 @@
         if (state.__endedAt) return;
         const dur = isFinite(v.duration) ? v.duration : 0;
         const cur = isFinite(v.currentTime) ? v.currentTime : 0;
-        if (dur > 5 && cur >= dur - 0.3) markEnded("pause");
+        if (dur > 5 && cur >= dur - endTolerance()) markEnded("pause");
       } catch (e) {}
     }, true);
     // 换源：重置递增追踪；若锁定后流已变成另一首，强制清旧锁
@@ -843,7 +1001,7 @@
   function lockPlayer() {
     try {
       // 抖音/直播为整段直链，不参与分段锁定，直接拒绝
-      if (isDouyin() || isLiveDouyin()) { log.info("抖音页跳过锁播放器"); return; }
+      if (isDouyin() || isLiveDouyin() || isYinhe()) { log.info("直链/本地页跳过锁播放器"); return; }
       const vids = Array.from(document.querySelectorAll("video") || []);
       const v = vids.find((x) => x && !x.paused && isFinite(x.duration)) || vids.find((x) => x && isFinite(x.duration) && x.duration > 0) || vids[0];
       if (!v || v.__sxpoLocked) return;
@@ -907,7 +1065,7 @@
     state.navBlock = !!on;
     navBlockApply();
   }
-  function navBlockLink() { if (isDouyin() || isLiveDouyin()) return; if (!state.navBlock) navBlock(true); }
+  function navBlockLink() { if (isDouyin() || isLiveDouyin() || isYinhe()) return; if (!state.navBlock) navBlock(true); }
   function navBlockRelease() { if (state.navBlock) navBlock(false); }
 
   function navBlockApply() {
@@ -1008,6 +1166,16 @@
               autoGroupArchiveTick(stNow.complete);
             }
           }
+          return;
+        }
+        // 已抓全待合并：换集（B站自动连播）不能清掉抓全成果，否则用户永远合并不了。
+        // 与 loadedmetadata 里"换源但已抓全就保留"的口径一致——抓全是最终成果，优先级最高。
+        if (isBili && state.__endedAt) {
+          log.info("B站换集但上一集已抓全，保留分段/分组数据待用户合并，不复位");
+          unlockPlayer(); navBlockRelease();
+          state.pageSig = sig;
+          // captureStatus 要求 __endedSig === pageSig() 才判抓全；换集后同步 sig，保住合并按钮
+          state.__endedSig = sig;
           return;
         }
         // 身份变了：强制复位上一集的锁定、拦截、全部旧集状态
@@ -1260,6 +1428,14 @@
   }
 
   function isDouyin() { return /douyin|iesdouyin/.test(HOST); }
+  // 音盒（用户自建本地音乐平台 127.0.0.1:8093 pc-player.html）：歌曲文件就在自己后端，
+  // 前端 loadSegmented 播放时逐段 fetch 只是播放通道，插件抓段没意义 → 整页豁免，面板只留 ⑥ 录制
+  function isYinhe() {
+    try {
+      if (HOST !== "127.0.0.1" && HOST !== "localhost") return false;
+      return /音盒|pc-player/i.test((document.title || "") + " " + location.pathname);
+    } catch (e) { return false; }
+  }
   function isLiveDouyin() {
     if (!isDouyin()) return false;
     if (/live\.douyin\.com/.test(HOST)) return true;
@@ -1359,7 +1535,7 @@
       if (!dyRaw.size) return null;
       const sp = new URL(location.href).searchParams;
       let id = sp.get("modal_id") || sp.get("aweme_id") || sp.get("vid") || "";
-      if (!id) { const m = /\/video\/(\d{8,})/.exec(location.pathname); if (m) id = m[1]; }
+      if (!id) { const m = /\/(?:video|note|slides)\/(\d{8,})/.exec(location.pathname); if (m) id = m[1]; }
       if (id && dyRaw.has(id)) return dyRaw.get(id).aw;
       const dom = dyActiveAweme();
       const want = String((dom && (dom.desc || (dom.music && dom.music.title))) || "").trim();
@@ -1406,6 +1582,8 @@
     // 双响炮原版口径：视频地址判定（mp4 / video/tos / aweme/v1/play 接口），剔图片
     const isVideoUrl = (u) => typeof u === "string" && /^https?:/i.test(u) &&
       !/\.(?:webp|jpe?g|png|gif|avif|heic)(?:\?|#|$)/i.test(u) &&
+      // 排除音频特征：tos-cn-ve-* 是抖音音频 bucket、*-ies-music 是音频 CDN（用户实测：背景音乐被误判成视频档，下出来全是音频）
+      !/tos-cn-ve-|-ies-music|-music\.|\/audio\/|\.m4a(?:[?#]|$)|\.mp3(?:[?#]|$)/i.test(u) &&
       (/\.mp4(?:\?|#|$)/i.test(u) || /\/video\/tos\//i.test(u) || /\/aweme\/v1\/play\//i.test(u));
     const normBitRate = (it) => {
       if (!it || typeof it !== "object") return null;
@@ -1439,6 +1617,8 @@
       let budget = 6000;
       const walk = (obj, depth, gearHint, keyName) => {
         if (budget <= 0) return;
+        // music/audio 子树整体跳过：背景音乐不是视频档（用户实测误判，下出来全是音频）
+        if (/music|audio/i.test(String(keyName || ""))) return;
         if (typeof obj === "string") {
           if (isVideoUrl(obj) && (/url|src|play|download|addr|api/i.test(String(keyName || "")) || /\/aweme\/v1\/play\//i.test(obj))) {
             pushCand({ url: obj, size: 0, gear: gearHint || "", watermark: /download/i.test(String(keyName || "")) });
@@ -1511,7 +1691,30 @@
   }
 
   // ===== 转封装（Mediabunny，库在文件尾部内联） =====
-  function MB() { return globalThis.Mediabunny; }
+  function MB() {
+    // 沙箱内 globalThis.Mediabunny 优先；缺失则回退到页面世界 unsafeWindow（用户在控制台注入的组件），
+    // 两条路都没有再由 ensureMB() 异步补装。根治"点合并没反应=组件缺失"。
+    try { if (globalThis.Mediabunny && typeof globalThis.Mediabunny.Input === "function") return globalThis.Mediabunny; } catch (e) {}
+    try { if (_unsafe && _unsafe.Mediabunny && typeof _unsafe.Mediabunny.Input === "function") return _unsafe.Mediabunny; } catch (e) {}
+    return null;
+  }
+  // 组件补装：沙箱两条路都没有时，从 CDN 动态 import 到页面世界并同步给沙箱 globalThis
+  let __mbLoading = null;
+  function ensureMB() {
+    const hit = MB(); if (hit) return Promise.resolve(hit);
+    if (__mbLoading) return __mbLoading;
+    __mbLoading = new Promise((resolve) => {
+      try {
+        import("https://esm.sh/mediabunny@1.66.2?bundle").then((mod) => {
+          try { if (_unsafe) _unsafe.Mediabunny = mod; } catch (e) {}
+          try { globalThis.Mediabunny = mod; } catch (e) {}
+          log.info("合并组件已从 CDN 补装");
+          resolve(MB());
+        }).catch((e) => { log.warn("合并组件补装失败", e && e.message); resolve(null); });
+      } catch (e) { resolve(null); }
+    });
+    return __mbLoading;
+  }
 
   async function mergeMediaBuffers(videoData, audioData) {
     const m = MB();
@@ -1600,34 +1803,42 @@
     // 纯媒体段（moof 开头）必须由 init 段的 moov 提供轨道元数据——通过 InputOptions.initInput 传入（Mediabunny 原生支持），
     // 解决爱奇艺/B站 "moof with no moov" 报错；双轨（B 站 DASH）各自独立 Input，音频 init 缺失时借视频 init（双轨同 moov 的站点）
     const tracks = { video: { init: [], media: [] }, audio: { init: [], media: [] } };
-    (segItems || []).forEach((it) => {
-      if (!it || !it.bytes || !it.bytes.length) return;
+    // 【内容级去重 · 用户实测加固】同一段字节可能被多个记录/MSE 重复喂入，不去重会导致：
+    // 时长翻倍（4:49 的视频合出 13 分钟）、AV1 sequence header 错乱、画面错序/混入别的内容。
+    // 这里在最后一道关口按 SHA-1 内容指纹去重，mergeSegments 与 downloadGroup 两条链都经过此处，统一生效。
+    const __muxSeen = new Set();
+    for (const it of (segItems || [])) {
+      if (!it || !it.bytes || !it.bytes.length) continue;
+      const isInit = isInitSegBytes(it.bytes);
+      if (!isInit) {
+        let h = "";
+        try { const hb = await crypto.subtle.digest("SHA-1", it.bytes); h = [...new Uint8Array(hb)].map((b) => b.toString(16).padStart(2, "0")).join(""); } catch (eD) {}
+        if (h && __muxSeen.has(h)) { continue; }   // 内容重复，丢弃
+        if (h) __muxSeen.add(h);
+      }
       const bucket = tracks[it.mediaType === "audio" ? "audio" : "video"];
-      (isInitSegBytes(it.bytes) ? bucket.init : bucket.media).push(it.bytes);
-    });
-    // init 缺失兜底：音频轨借视频轨的 init（爱奇艺单 init 含双轨）；视频轨缺 init 无法兜底（真缺失）
-    if (!tracks.video.init.length && tracks.video.media.length) {
-      const init = await findMissingInit("video");
-      if (init) tracks.video.init.push(init);
-    }
-    if (!tracks.audio.init.length && tracks.audio.media.length) {
-      const init = await findMissingInit("audio") || (tracks.video.init.length ? tracks.video.init[0] : null);
-      if (init) tracks.audio.init.push(init);
-    }
-    if (!tracks.video.init.length && tracks.video.media.length && tracks.audio.init.length) {
-      tracks.video.init.push(tracks.audio.init[0]);   // 音频先找到时反向借用
+      (isInit ? bucket.init : bucket.media).push(it.bytes);
     }
 
     // init 缺失兜底：嗅探/预下/MSE 都没拿到 init（爱奇艺 init 命名不规范且不走 MSE）时，
     // 扫描台账里的 mp4/mp2t 候选（播放器请求过的独立请求，URL 就在①直链列表里），
     // 逐个拉字节做 ftyp+moov 字节级验证——init 段通常很小，逐个探测开销可控
+    // 【修复】本函数必须定义在下方调用之前：原来定义在后、先调用会抛 ReferenceError 被外层吞掉 → 合成失败降级 m4s
     const findMissingInit = async (kind) => {
       try {
         if (state.groupInit[kind]) return state.groupInit[kind];
-        const cands = Array.from(state.videoUrlMap.values()).filter((it) =>
-          it && !it.mseKey && !isSegRecord(it) && !state.groupBytes.has(segKey(it.url, it)) &&
-          (String(it.type) === "mp4" || /mp4|mp2t/i.test(String(it.source) || ""))
-        );
+        // 【修复】init 段必须纳入候选：fmp4-init 类型 + URL 含 init 的，虽带 .m4s 会被 isSegRecord 误判分段，但正是 init 来源。
+        // 再加兜底：所有 m4s/mp4 记录都纳入（B站 init 常是普通 m4s 小请求），逐个拉字节做 ftyp+moov 验证，是真 init 就用。
+        const all = Array.from(state.videoUrlMap.values());
+        let cands = all.filter((it) => {
+          if (!it || it.mseKey) return false;
+          const isInitRec = String(it.type) === "fmp4-init" || /(^|[\/._-])init([._-](mp4|m4s|ts))?([?#]|$)/i.test(it.url || "");
+          if (isInitRec) return true;
+          return !state.groupBytes.has(segKey(it.url, it)) &&
+            (String(it.type) === "mp4" || /mp4|mp2t/i.test(String(it.source) || ""));
+        });
+        // 兜底：上面的候选都不命中时，把所有 m4s/mp4 分段也拉来验一遍（B站 init 被当普通分段登记的情况）
+        if (!cands.length) cands = all.filter((it) => it && !it.mseKey && /\.(m4s|mp4)(\?|#|$)/i.test(it.url || ""));
         log.info("缺失 " + kind + " init，扫描台账候选 " + cands.length + " 个…");
         for (const it of cands) {
           try {
@@ -1643,6 +1854,19 @@
       } catch (e) {}
       return null;
     };
+
+    // init 缺失兜底：音频轨借视频轨的 init（爱奇艺单 init 含双轨）；视频轨缺 init 无法兜底（真缺失）
+    if (!tracks.video.init.length && tracks.video.media.length) {
+      const init = await findMissingInit("video");
+      if (init) tracks.video.init.push(init);
+    }
+    if (!tracks.audio.init.length && tracks.audio.media.length) {
+      const init = await findMissingInit("audio") || (tracks.video.init.length ? tracks.video.init[0] : null);
+      if (init) tracks.audio.init.push(init);
+    }
+    if (!tracks.video.init.length && tracks.video.media.length && tracks.audio.init.length) {
+      tracks.video.init.push(tracks.audio.init[0]);   // 音频先找到时反向借用
+    }
 
     const buildInput = (kind) => {
       const t = tracks[kind];
@@ -1748,7 +1972,16 @@
       if ($bar && typeof pct === "number") $bar.style.width = clamp(pct, 0, 100) + "%";
       if ($t && text) $t.textContent = text;
     };
-    if (!MB() || typeof MB().Input !== "function") { toast("合并组件缺失，请更新脚本", "error"); finishMerge(); return; }
+    if (!MB() || typeof MB().Input !== "function") {
+      // 组件缺失：先尝试从 CDN 自动补装，成功就继续；失败才明确报错（不再静默退出）
+      try {
+        const mod = await ensureMB();
+        if (!mod || typeof mod.Input !== "function") throw new Error("组件补装失败");
+      } catch (eMBx) {
+        showFatal("合并组件缺失且自动补装失败：" + (eMBx && eMBx.message || eMBx) + "。请检查网络能否访问 esm.sh，或重新覆盖最新脚本。");
+        finishMerge(); return;
+      }
+    }
     state.merging = true;
     const baseName = ((state.mergeNameOverride || trackTitle() || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 50)) || "video";
     try {
@@ -1954,6 +2187,10 @@
         setProgress(90, "封装 mp4 中...");
         const kept = vTrackBytes.concat(aTrackBytes);
         if (!kept.length) throw new Error("没有有效分段");
+        // 合成前诊断：把"抓到几段/有没有 init"直接打出来，失败时能一眼定位是抓取问题还是合成问题
+        const diagInitV = !!(state.groupInit && state.groupInit.video), diagInitA = !!(state.groupInit && state.groupInit.audio);
+        const diagMsg = "视频段 " + vTrackBytes.length + " / 音频段 " + aTrackBytes.length + " / init视频:" + (diagInitV ? "有" : "无") + " init音频:" + (diagInitA ? "有" : "无");
+        log.info("⑥合并诊断：" + diagMsg);
         try {
           // 组装 {mediaType, bytes} 交给分轨合并引擎（v0.8.0：init 段识别注入 + 按轨 Input+initInput + 时间戳平移）
           const segItems2 = [];
@@ -1961,7 +2198,15 @@
           aTrackBytes.forEach((b) => segItems2.push({ mediaType: "audio", bytes: b }));
           outBuffer = await muxSegmentsToMp4(MB(), segItems2);
         }
-        catch (muxF) { log.warn("fMP4 合成失败，改存原始分段:", muxF && muxF.message); const tot = kept.reduce((s, b) => s + b.length, 0); const raw = new Uint8Array(tot); let o2 = 0; for (const b of kept) { raw.set(b, o2); o2 += b.length; } outBuffer = raw.buffer; outExt = ".m4s"; toast("mp4 合成失败，已改存 .m4s", "warn"); }
+        catch (muxF) {
+          const em = (muxF && muxF.message) || String(muxF);
+          log.warn("fMP4 合成失败，改存原始分段:", em, "｜", diagMsg);
+          const tot = kept.reduce((s, b) => s + b.length, 0); const raw = new Uint8Array(tot); let o2 = 0;
+          for (const b of kept) { raw.set(b, o2); o2 += b.length; }
+          outBuffer = raw.buffer; outExt = ".m4s";
+          // 提示直接带诊断，用户不用开 F12 也能看清失败原因
+          toast("合成失败(" + diagMsg + ")：" + em.slice(0, 60), "error");
+        }
       } else {
         setProgress(87, "拼接分段...");
         const totalLen = results.reduce((sum, u8) => sum + (u8 ? u8.length : 0), 0);
@@ -1975,21 +2220,22 @@
       ledgerPut(epKey, fp, baseName, results.length);
       setProgress(100, "下载完成");
       toast("已保存 " + baseName + outExt, "success");
-      // 完整版已保存：本会话落盘的分组片段完成使命——页面脚本无法删磁盘文件，但把清理清单列给用户（用户敲定）
+      // 完整版已保存：自动生成"清理分组片段.bat"下载到桌面，双击即可把本次片段移入回收站（可恢复）
       try {
         if (state.groupFiles && state.groupFiles.length) {
-          log.info("以下分组片段已可删除（完整版 " + baseName + outExt + " 已包含其全部内容）:\n  " + state.groupFiles.join("\n  "));
-          toast("完整版已保存；桌面上的分组片段（组1~组" + state.groupFiles.length + "）已完成使命，可删除", "");
+          emitCleanupBat(state.groupFiles.slice());
+          log.info("已生成清理脚本（桌面 清理分组片段.bat），含 " + state.groupFiles.length + " 个分组片段");
+          toast("完整版已保存；桌面已生成「清理分组片段.bat」，双击可清理 " + state.groupFiles.length + " 个片段", "");
           state.groupFiles = [];
         }
-      } catch (eGF) {}
+      } catch (eGF) { showFatal("清理脚本生成失败：" + (eGF && eGF.message || eGF)); }
       // 清缓存但保留记录与已保存标记
       clearSegCache();
       urls.forEach((u) => { const it = state.videoUrlMap.get(u); if (it && !it.savedAt) it.savedAt = Date.now(); });
     } catch (error) {
       log.error("分段下载失败", error);
       setProgress(0, "下载失败");
-      toast("分段下载失败：" + ((error && error.message) || error), "error");
+      showFatal("合并失败：" + ((error && error.message) || error) + "。若刷新后反复失败，请从头重新播放一次再合并。");
     } finally {
       // 合并完成后直接清理分组固化数据（用户敲定：不清理垃圾太多）
       finishMerge();
@@ -2011,6 +2257,33 @@
     a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  // 生成清理脚本（整片合并成功后）：把本次落盘的分组小片段精确移入回收站，可恢复、不误伤其他文件。
+  // 浏览器沙箱不能直接删磁盘文件，故下载一个 .bat 让用户双击执行；文件名含中文，写 UTF-8 BOM + PowerShell 处理。
+  function emitCleanupBat(fileNames) {
+    try {
+      const list = (fileNames || []).filter((n) => typeof n === "string" && n.length).map((n) => n.replace(/'/g, "''"));
+      if (!list.length) return;
+      const psArray = list.map((n) => "'" + n + "'").join(",");
+      // PowerShell：桌面目录 + 只删数组内列出的确切文件名 + 走回收站（Microsoft.VisualBasic）
+      const ps = "$ErrorActionPreference='SilentlyContinue';" +
+        "Add-Type -AssemblyName Microsoft.VisualBasic;" +
+        "$desk=[Environment]::GetFolderPath('Desktop');" +
+        "$names=@(" + psArray + ");" +
+        "$n=0;foreach($f in $names){" +
+        "$p=Join-Path $desk $f;" +
+        "if(Test-Path -LiteralPath $p){" +
+        "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile($p,'OnlyErrorDialogs','SendToRecycleBin');$n++" +
+        "}};" +
+        "Write-Host ('已移入回收站 '+$n+' 个分组片段');Start-Sleep 3";
+      const bat = "@echo off\r\nchcp 65001 >nul\r\npowershell -NoProfile -ExecutionPolicy Bypass -Command \"" + ps + "\"\r\npause\r\n";
+      // UTF-8 BOM，保证中文文件名在 bat/powershell 里正确
+      const bytes = new Uint8Array(3 + new TextEncoder().encode(bat).length);
+      bytes[0] = 0xEF; bytes[1] = 0xBB; bytes[2] = 0xBF;
+      bytes.set(new TextEncoder().encode(bat), 3);
+      saveBlob(bytes.buffer, "清理分组片段.bat", "application/x-msdownload");
+    } catch (e) { log.warn("生成清理脚本失败", e && e.message); }
   }
 
   // ===== 自动保存到桌面：首次授权一次桌面目录，句柄存 IndexedDB，之后静默写盘，不再弹窗 =====
@@ -2060,38 +2333,13 @@
     } catch (e) { return null; }
   }
 
-  // 录制文件保存：用已授权的桌面目录静默写盘；不成则退回保存窗/下载目录
-  async function saveRecordingToDesktop(blob, name, mimeType) {
+  // 录制文件保存：固定走浏览器默认下载目录（本机 Edge = 桌面）。零弹窗、不认任何"记住的目录"，所见即所得。
+  // 不再用 showDirectoryPicker/showSaveFilePicker 那套——它会记住用户某次误选的隐藏目录，导致文件找不到。
+  function saveRecordingToDesktop(blob, name, mimeType) {
     const mt = (mimeType || "video/webm").split(";")[0];
-    const dots = mt.indexOf("mp4") >= 0 ? [".mp4"] : [".webm"];
-    const dir = state.__desktopDir || await idbGetDesktopDir();
-    if (dir) {
-      try {
-        const fh = await dir.getFileHandle(name, { create: true });
-        const w = await fh.createWritable();
-        await w.write(blob);
-        await w.close();
-        return "desktop";
-      } catch (e) { log.warn("静默写桌面失败，改用保存窗", e); }
-    }
-    try {
-      if (typeof window.showSaveFilePicker === "function") {
-        const h = await window.showSaveFilePicker({
-          suggestedName: name,
-          startIn: "desktop",
-          types: [{ description: "视频文件", accept: { [mt]: dots } }],
-        });
-        const w = await h.createWritable();
-        await w.write(blob);
-        await w.close();
-        return "desktop";
-      }
-    } catch (e) {
-      if (e && e.name === "AbortError") return "cancel";
-      log.warn("保存到桌面失败，回退下载目录", e);
-    }
     saveBlob(blob, name, mt);
-    return "fallback";
+    log.info("⑥录制：已保存到浏览器默认下载目录（桌面） " + name);
+    return "desktop";
   }
 
   // ===== 直链下载 / 直链对合并 =====
@@ -2123,6 +2371,456 @@
         ontimeout: () => { toast("下载 " + fileName + " 请求超时", "error"); },
       });
     } catch (e) { toast("下载失败：" + (e && e.message), "error"); }
+  }
+
+  // ===== 通用直下（真实字节进度）=====
+  // 为什么不用 GM_download 拿进度：暴力猴/篡改猴部分版本 GM_download 的 onprogress 不回调，只有开始/结束两态，
+  // 进度条永远停在 0%（用户实测反馈）。改用 GM_xmlhttpRequest 自己拉字节：onprogress 稳定、可带 Referer 过防盗链，
+  // 下完 saveBlob 落盘到浏览器下载目录（本机=桌面）。进度双写：state[kind] 供面板重绘恢复 + 直接刷 DOM（不等 1.5s 重绘）。
+  function downloadWithProgress(opts) {
+    const stKey = opts.kind === "dy" ? "__dyDl" : "__biliDl";
+    const name = opts.name || ("视频_" + Date.now() + ".mp4");
+    const d = { active: true, pct: 0, loaded: 0, total: opts.size || 0, name: name };
+    state[stKey] = d;
+    const mb = (n) => (n / 1048576).toFixed(1);
+    const paint = () => {
+      try {
+        const wrap = document.getElementById("qd-dl-wrap");
+        const pctEl = document.getElementById("qd-dl-pct");
+        const barEl = document.getElementById("qd-dl-bar");
+        const txtEl = document.getElementById("qd-dl-txt");
+        if (wrap) wrap.style.display = "block";
+        if (pctEl) pctEl.textContent = d.pct + "%";
+        if (barEl) barEl.style.width = d.pct + "%";
+        if (txtEl) txtEl.textContent = d.total ? "（" + mb(d.loaded) + " / " + mb(d.total) + " MB）" : (d.loaded ? "（已下 " + mb(d.loaded) + " MB）" : "");
+      } catch (e) {}
+    };
+    const setP = (loaded, total) => {
+      if (typeof loaded === "number" && loaded >= 0) d.loaded = loaded;
+      if (total) d.total = total;
+      d.pct = d.total ? Math.min(99, Math.round(d.loaded / d.total * 100)) : d.pct;
+      paint();
+    };
+    const finish = (ok, msg) => {
+      state[stKey] = null;
+      try { const wrap = document.getElementById("qd-dl-wrap"); if (wrap) wrap.style.display = "none"; } catch (e) {}
+      toast(msg, ok ? "success" : "error");
+      try { if (ok) { opts.onDone && opts.onDone(); } else { opts.onFail && opts.onFail(msg); } } catch (e) {}
+    };
+    paint();
+    // 没有 GM_xhr 才回退 GM_download（可能拿不到进度，但能下）
+    if (!_GMxhr) {
+      if (!_GM_download) { finish(false, "缺少下载能力（需要暴力猴/TamperMonkey）"); return; }
+      _GM_download({
+        url: opts.url, name: name, headers: { Referer: opts.referer },
+        onload: () => finish(true, "✓ 已下载到桌面：" + name),
+        onerror: (er) => finish(false, "下载失败：" + ((er && er.error) || "未知")),
+        ontimeout: () => finish(false, "下载超时，可重试"),
+        onprogress: (p) => { try { if (p && p.loaded) setP(p.loaded || 0, p.total || 0); } catch (e) {} },
+      });
+      return;
+    }
+    log.info("直下开始（GM_xhr 字节进度）:", name, String(opts.url).slice(0, 80));
+    _GMxhr({
+      method: "GET", url: opts.url, responseType: "arraybuffer",
+      headers: { Referer: opts.referer, "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" },
+      onprogress: (p) => { try { if (p) setP(p.loaded || 0, p.total || 0); } catch (e) {} },
+      onload: (r) => {
+        try {
+          if (!(r.status >= 200 && r.status < 400)) { finish(false, "下载失败：HTTP " + r.status); return; }
+          const ab = r.response;
+          if (!ab || !ab.byteLength) { finish(false, "下载失败：内容为空"); return; }
+          d.total = d.total || ab.byteLength;
+          d.pct = 100; d.loaded = ab.byteLength; paint();
+          saveBlob(ab, name, "video/mp4");
+          finish(true, "✓ 已下载到桌面：" + name);
+        } catch (e) { finish(false, "保存失败：" + ((e && e.message) || e)); }
+      },
+      onerror: () => finish(false, "下载网络错误，可重试"),
+      ontimeout: () => finish(false, "下载超时，可重试"),
+    });
+  }
+
+  // ⑦ 进度条 HTML（始终渲染，display 由 state 控制；onprogress 直接刷 #qd-dl-pct/#qd-dl-bar 即时生效）
+  function dlProgressHtml(d) {
+    const mb = (n) => (n / 1048576).toFixed(1);
+    const on = !!(d && d.active);
+    return '<div id="qd-dl-wrap" style="margin-top:8px;' + (on ? "" : "display:none;") + '">' +
+      '<div style="font-size:12px;color:#555;">⏳ 下载中 <b id="qd-dl-pct" style="color:#8e44ad;">' + (d ? d.pct : 0) + '%</b>' +
+      '<span id="qd-dl-txt">' + (d && d.total ? '（' + mb(d.loaded) + ' / ' + mb(d.total) + ' MB）' : '') + '</span>' +
+      '　<span style="color:#999;">' + escapeHtml(d ? (d.name || '') : '') + '</span></div>' +
+      '<div style="height:6px;background:#eee;border-radius:4px;margin-top:4px;overflow:hidden;">' +
+      '<div id="qd-dl-bar" style="height:100%;width:' + (d ? (d.pct || 0) : 0) + '%;background:#8e44ad;border-radius:4px;transition:width .3s;"></div>' +
+      '</div></div>';
+  }
+
+  // ⑦ 抖音一键直下内容（视频/图文/未解析三态 + 进度条），由 ③ 地址列表顶部渲染（用户要求合并到顶部）
+  function dySevenHtml() {
+    let h = "";
+    try {
+      const dyVids = (function () { try { return dySources(pageSig()).filter((x) => x.mediaType === "video"); } catch (e) { return []; } })();
+      const dyImgs = (function () { try { return dyImageSources(); } catch (e) { return []; } })();
+      if (dyVids.length) {
+        h += '<div style="font-weight:700;color:#8e44ad;">⑦ 抖音视频直下（推荐）</div>' +
+          '<div style="color:#555;font-size:12px;margin-top:4px;">无水印原画质，直接下当前视频到桌面（已解析到 ' + dyVids.length + ' 档）</div>' +
+          '<div style="margin-top:6px;">' +
+          '<a href="javascript:;" data-qd-dy-dl style="display:inline-block;padding:4px 14px;border-radius:6px;font-weight:700;font-size:12px;color:#fff;background:#8e44ad;text-decoration:none;white-space:nowrap;">⬇ 下载当前视频</a>' +
+          '</div>';
+      } else if (dyImgs.length) {
+        h += '<div style="font-weight:700;color:#8e44ad;">⑦ 抖音图文直下（推荐）</div>' +
+          '<div style="color:#555;font-size:12px;margin-top:4px;">图文作品 · 已解析 ' + dyImgs.length + ' 张无水印原图</div>' +
+          '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<a href="javascript:;" data-qd-dy-imgs style="display:inline-block;padding:4px 14px;border-radius:6px;font-weight:700;font-size:12px;color:#fff;background:#8e44ad;text-decoration:none;white-space:nowrap;">⬇ 下载全部图片（' + dyImgs.length + ' 张）</a>' +
+          '<a href="javascript:;" data-qd-dy-synth style="display:inline-block;padding:4px 14px;border-radius:6px;font-weight:700;font-size:12px;color:#fff;background:#e67e22;text-decoration:none;white-space:nowrap;">🎬 合成视频（图+音乐）</a>' +
+          '</div>' +
+          // 合成进度状态行（state 驱动防面板重绘冲掉；id 供 setSynth 即时刷新）
+          '<div id="qd-synth-status" style="margin-top:6px;color:#e67e22;font-size:12px;min-height:1em;">' + escapeHtml(state.__dySynthText || "") + '</div>';
+      } else {
+        h += '<div style="font-weight:700;color:#8e44ad;">⑦ 抖音直下（推荐）</div>' +
+          '<div style="color:#555;font-size:12px;margin-top:4px;">无水印原画质，直接下当前作品到桌面（播放几秒后可用）</div>' +
+          '<div style="margin-top:6px;">' +
+          '<a href="javascript:;" data-qd-dy-dl style="display:inline-block;padding:4px 14px;border-radius:6px;font-weight:700;font-size:12px;color:#fff;background:#8e44ad;text-decoration:none;white-space:nowrap;">⬇ 下载当前作品</a>' +
+          '</div>';
+      }
+      h += dlProgressHtml(state.__dyDl);
+    } catch (e) {}
+    return h;
+  }
+
+  // ===== ⑦ B站 BV 号直下（官方 API 单文件，绕开抓段/录屏/合并的全部坑）=====
+  // 实测结论：B站 x/player/playurl 的 fnval=0 返回 format=mp4 的现成单文件（音视频一体、H264、无序列头问题），
+  // 一个链接直接落盘，画质/时长/音画同步全部正确。比抓 DASH 分段再 mux 干净可靠得多。
+  // 流程：BV 号 → web-interface/view 取 cid → player/playurl(fnval=0) 取 durl[0].url → GM_download 带 Referer 存桌面。
+  function parseBV(raw) {
+    const s = String(raw || "").trim();
+    // 完整链接里抠出 BV 号（兼容 ?p= / 短链文本 / 直接 BV 号）
+    const m = /BV[0-9A-Za-z]{10}/.exec(s);
+    return m ? m[0] : "";
+  }
+  function biliApiGet(url) {
+    return new Promise((resolve, reject) => {
+      const hdrs = { Referer: "https://www.bilibili.com/", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36" };
+      if (_GMxhr) {
+        _GMxhr({ method: "GET", url, headers: hdrs, timeout: 20000,
+          onload: (r) => { if (r.status >= 200 && r.status < 400) { try { resolve(JSON.parse(r.responseText)); } catch (e) { reject(new Error("接口返回非 JSON")); } } else reject(new Error("HTTP " + r.status)); },
+          onerror: () => reject(new Error("网络错误")), ontimeout: () => reject(new Error("接口超时")) });
+      } else {
+        fetch(url, { headers: hdrs }).then((r) => r.json()).then(resolve).catch((e) => reject(e));
+      }
+    });
+  }
+  async function biliDownloadByBV(bv, $btn) {
+    const setBtn = (txt, bg) => { try { if ($btn) { $btn.textContent = txt; if (bg) $btn.style.background = bg; } } catch (e) {} };
+    try {
+      if (!parseBV(bv)) { toast("BV 号格式不对，应形如 BV1AmpJ6pEh8", "error"); setBtn("⬇ 下载到桌面", "#8e44ad"); return; }
+      if (!_GM_download) { toast("需要暴力猴/TamperMonkey 才能下载到桌面", "error"); setBtn("⬇ 下载到桌面", "#8e44ad"); return; }
+      const bvid = parseBV(bv);
+      setBtn("⏳ 查询视频…", "#909399");
+      log.info("⑦B站直下 开始:", bvid);
+      // 1) 取 cid + 标题
+      const info = await biliApiGet("https://api.bilibili.com/x/web-interface/view?bvid=" + encodeURIComponent(bvid));
+      if (!info || info.code !== 0 || !info.data || !info.data.cid) throw new Error((info && info.message) || "查不到该视频（可能需登录或 BV 号错误）");
+      const cid = info.data.cid;
+      const rawTitle = String(info.data.title || bvid).replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 60) || bvid;
+      // 2) 取 mp4 单文件直链（fnval=0 → format=mp4）
+      setBtn("⏳ 取下载地址…", "#909399");
+      const play = await biliApiGet("https://api.bilibili.com/x/player/playurl?bvid=" + encodeURIComponent(bvid) + "&cid=" + cid + "&qn=64&fnval=0&fourk=0");
+      if (!play || play.code !== 0 || !play.data) throw new Error((play && play.message) || "取播放地址失败");
+      const durl = play.data.durl && play.data.durl[0];
+      if (!durl || !durl.url) throw new Error("该视频没有可直接下载的 mp4（可能仅限大会员/需登录）");
+      // 3) 下载到桌面（GM_xhr 真实字节进度 → saveBlob 落盘；GM_download 的 onprogress 在部分暴力猴版本不回调）
+      const fileName = rawTitle + ".mp4";
+      setBtn("⏳ 下载中…", "#909399");
+      log.info("⑦B站直下 直链到手，开始落盘:", fileName, "大小", Math.round((durl.size || 0) / 1048576) + "MB");
+      toast("开始下载：" + fileName, "");
+      downloadWithProgress({
+        kind: "bili", url: durl.url, name: fileName, size: durl.size || 0,
+        referer: "https://www.bilibili.com/video/" + bvid + "/",
+        onDone: () => {
+          // 下载成功自动清空 BV 输入框（state + DOM 同步清，面板重绘后仍是空的）；失败时保留便于重试
+          try { state.__biliBV = ""; const inp = document.getElementById("qd-bv-input"); if (inp) inp.value = ""; } catch (eC) {}
+          setBtn("⬇ 下载到桌面", "#8e44ad"); log.info("⑦B站直下 完成:", fileName);
+        },
+        onFail: (m) => { setBtn("⬇ 下载到桌面", "#8e44ad"); showFatal("B站直下失败：" + m); log.error("⑦B站直下 失败:", m); },
+      });
+    } catch (e) {
+      try { state.__biliDl = null; } catch (eDl) {}
+      const msg = (e && e.message) || String(e);
+      toast("B站直下失败：" + msg, "error");
+      showFatal("B站直下失败：" + msg);
+      log.error("⑦B站直下异常", e);
+      setBtn("⬇ 下载到桌面", "#8e44ad");
+    }
+  }
+
+  // ⑦ 抖音页一键下载当前视频：复用已抓到的 aweme 数据（dySources 第一=无水印H264最高画质），零依赖免费
+  // ⑦ 抖音图文笔记：从 aweme 的 images / image_post_info.images 取无水印原图（download_url_list 优先，其次 url_list 末位=最大尺寸）
+  function dyImageSources() {
+    if (!isDouyin()) return [];
+    const srcs = [];
+    try {
+      const dom = dyActiveAweme();
+      const raw = dyRawAweme();
+      if (raw) srcs.push(raw);
+      if (dom && dom !== raw) srcs.push(dom);
+    } catch (e0) {}
+    if (!srcs.length) return [];
+    const out = [];
+    srcs.forEach((aw) => {
+      try {
+        const imgs = (aw && aw.images) || (aw && aw.image_post_info && aw.image_post_info.images) || [];
+        if (!Array.isArray(imgs)) return;
+        imgs.forEach((im, i) => {
+          if (!im || typeof im !== "object") return;
+          const dl = im.downloadUrlList || im.download_url_list || [];
+          const ul = im.urlList || im.url_list || [];
+          let url = "";
+          if (Array.isArray(dl) && dl.length) url = dl[dl.length - 1];
+          if (!url && Array.isArray(ul) && ul.length) url = ul[ul.length - 1];
+          if (typeof url !== "string" || !/^https?:/i.test(url)) return;
+          const extM = /\.(jpe?g|png|webp|heic|avif)(?:[?#]|$)/i.exec(url);
+          out.push({ url: url, index: i + 1, ext: extM ? extM[1].toLowerCase() : "jpeg" });
+        });
+      } catch (e1) {}
+    });
+    const seen = new Set();
+    return out.filter((it) => { const k = it.url.split("?")[0]; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+
+  // 下载全部图文图片：GM_xhr 带 Referer 拉字节（图片 CDN 有防盗链），间隔 500ms 逐张存盘，避免浏览器拦多文件下载
+  function downloadDouyinImages($btn) {
+    const setBtn = (txt, bg) => { try { if ($btn) { $btn.textContent = txt; if (bg) $btn.style.background = bg; } } catch (e) {} };
+    try {
+      const imgs = dyImageSources();
+      if (!imgs.length) { toast("还没解析到图片：请等图文加载出来再点", "warn"); log.info("⑦图文直下：dyImageSources 为空"); return; }
+      let prefix = "抖音图文_" + Date.now();
+      try {
+        const aw = dyRawAweme();
+        const t = String((aw && aw.desc) || "").replace(/[\\/:*?"<>|\s#]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 36);
+        if (t) prefix = t;
+      } catch (eT) {}
+      log.info("⑦图文直下 开始:", imgs.length, "张", prefix);
+      setBtn("⏳ 下载中 0/" + imgs.length, "#909399");
+      let done = 0;
+      imgs.forEach((it, i) => {
+        setTimeout(() => {
+          const name = prefix + "_" + String(it.index).padStart(2, "0") + "." + it.ext;
+          const okOne = () => {
+            done++;
+            setBtn("⏳ 下载中 " + done + "/" + imgs.length, "#909399");
+            if (done === imgs.length) { toast("✓ 已下载 " + imgs.length + " 张图到桌面", "success"); setBtn("⬇ 下载全部图片", "#8e44ad"); }
+          };
+          try {
+            if (_GMxhr) {
+              _GMxhr({ method: "GET", url: it.url, responseType: "arraybuffer", headers: { Referer: "https://www.douyin.com/" },
+                onload: (r) => { try { if (r.status >= 200 && r.status < 400 && r.response) { saveBlob(r.response, name, "image/" + (it.ext === "jpeg" ? "jpeg" : it.ext)); okOne(); } else log.warn("图片下载失败 HTTP " + r.status, String(it.url).slice(-60)); } catch (e2) {} },
+                onerror: () => log.warn("图片下载网络错误", String(it.url).slice(-60)) });
+            } else if (_GM_download) {
+              _GM_download({ url: it.url, name: name, headers: { Referer: "https://www.douyin.com/" }, onload: okOne, onerror: () => log.warn("图片下载失败", String(it.url).slice(-60)) });
+            } else { toast("需要暴力猴/TamperMonkey 才能下载", "error"); }
+          } catch (e3) { log.warn("图片下载异常", e3 && e3.message); }
+        }, i * 500);
+      });
+    } catch (e) {
+      toast("图文下载失败：" + ((e && e.message) || e), "error");
+      log.error("⑦图文直下异常", e);
+      setBtn("⬇ 下载全部图片", "#8e44ad");
+    }
+  }
+
+  // ⑦ 图文合成：提取背景音乐 URL。music 子树深扫（aweme 结构多变，playUrl 不一定有 url）；兜底用嗅探到的音频直链
+  function dyMusicUrl() {
+    try {
+      const aw = dyRawAweme();
+      const cands = [];
+      const walk = (obj, depth) => {
+        if (!obj || typeof obj !== "object" || depth > 6) return;
+        if (typeof obj.url === "string" && /^https?:/i.test(obj.url)) cands.push(obj.url);
+        if (typeof obj.playUrl === "string" && /^https?:/i.test(obj.playUrl)) cands.push(obj.playUrl);
+        const ul = obj.urlList || obj.url_list;
+        if (Array.isArray(ul)) ul.forEach((u) => { if (typeof u === "string" && /^https?:/i.test(u)) cands.push(u); });
+        for (const k in obj) { if (k === "urlList" || k === "url_list") continue; walk(obj[k], depth + 1); }
+      };
+      walk(aw && aw.music, 0);
+      const hit = cands.find((u) => /aweme\/v1\/play|\.m4a(?:[?#]|$)|\.mp3(?:[?#]|$)/i.test(u)) || cands[0] || "";
+      if (hit) return hit;
+    } catch (e0) {}
+    try {
+      const f = currentFilter();
+      const it = Array.from(state.videoUrlMap.values()).filter((x) => f(x) && x.mediaType === "audio" && /^https?:/i.test(x.url || "") && !/\.(ts|m4s)(\?|#|$)/i.test(x.url))[0];
+      if (it) return it.url;
+    } catch (e1) {}
+    return "";
+  }
+
+  // ⑦ 抖音图文一键合成视频：图片轮播 + 背景音乐 → 单个 mp4（浏览器内 Mediabunny 编码，与④普通合并同组件）
+  // 时长以音乐为准；每张图均分时长；1080×1920 画布 contain 居中黑底；视频轨 1fps 静态帧（H264 轻量编码）
+  async function synthesizeDyImageVideo($btn) {
+    const setBtn = (txt, bg) => { try { if ($btn) { $btn.textContent = txt; if (bg) $btn.style.background = bg; } } catch (e) {} };
+    // 状态行：面板 1.5s 重绘会冲掉按钮文字，状态写 state + 直接刷 #qd-synth-status（合成结束 finally 清空）
+    const setSynth = (txt) => {
+      try {
+        state.__dySynthText = txt || "";
+        const el = document.getElementById("qd-synth-status");
+        if (el) el.textContent = state.__dySynthText;
+      } catch (e) {}
+      setBtn(txt ? (txt.length > 13 ? txt.slice(0, 13) + "…" : txt) : "🎬 合成视频（图+音乐）", txt ? "#909399" : "#e67e22");
+    };
+    try {
+      let m = MB();
+      // 组件能力校验：残留在页面世界的旧版 Mediabunny（早年手动注入）可能只有 Input 没有 CanvasSource/VideoSampleSource，
+      // 此时强制从 CDN 重新加载（URL 带时间戳防浏览器缓存旧构建），并覆盖回写
+      if (!m || typeof m.Output !== "function" || (typeof m.VideoSampleSource !== "function" && typeof m.CanvasSource !== "function")) {
+        setSynth("⏳ 加载合成组件…");
+        try {
+          const mod = await import("https://esm.sh/mediabunny@1.66.2?bundle&fresh=" + Date.now());
+          try { if (_unsafe) _unsafe.Mediabunny = mod; } catch (e1) {}
+          try { globalThis.Mediabunny = mod; } catch (e2) {}
+          m = mod;
+          log.info("合成组件已加载: CanvasSource=" + typeof m.CanvasSource + " VideoSampleSource=" + typeof m.VideoSampleSource);
+        } catch (eImp) {
+          toast("合成组件加载失败：" + ((eImp && eImp.message) || eImp), "error");
+          log.error("⑦图文合成 组件加载失败", eImp);
+          return;
+        }
+      }
+      if (!m || typeof m.Output !== "function" || (typeof m.VideoSampleSource !== "function" && typeof m.CanvasSource !== "function")) {
+        const keys = Object.keys(m || {}).filter((k) => /source|canvas|sample|sink/i.test(k)).join(",");
+        throw new Error("合成组件缺视频源类（" + (keys || "空") + "）");
+      }
+      const imgs = dyImageSources();
+      if (!imgs.length) { toast("还没解析到图片：请等图文加载出来", "warn"); return; }
+      const aw = dyRawAweme();
+      const musicUrl = dyMusicUrl();
+      if (!musicUrl) {
+        try { log.error("⑦图文合成：无音乐。aweme.music=", JSON.stringify((aw && aw.music) || null).slice(0, 400)); } catch (eL) {}
+        toast("没解析到背景音乐，无法合成（先播放几秒让音频加载，再重试）", "error");
+        return;
+      }
+      const fetchBuf = (url) => new Promise((resolve, reject) => {
+        if (_GMxhr) {
+          _GMxhr({ method: "GET", url: url, responseType: "arraybuffer", headers: { Referer: "https://www.douyin.com/" },
+            onload: (r) => { if (r.status >= 200 && r.status < 400 && r.response) resolve(r.response); else reject(new Error("HTTP " + r.status)); },
+            onerror: () => reject(new Error("网络错误")), ontimeout: () => reject(new Error("超时")) });
+        } else { fetch(url).then((r) => r.arrayBuffer()).then(resolve, reject); }
+      });
+      // 1) 下载素材（图 + 音乐）
+      const totalN = imgs.length + 1;
+      let got = 0;
+      const tick = () => { got++; setSynth("⏳ 下载素材 " + got + "/" + totalN); };
+      const imgBufs = [];
+      for (let i = 0; i < imgs.length; i++) { imgBufs.push(await fetchBuf(imgs[i].url)); tick(); }
+      const audioAb = await fetchBuf(musicUrl); tick();
+      // 2) 解码音乐（45s 竞速超时：卡住要明确报错，不能永远干等）
+      setSynth("⏳ 解码音乐…");
+      const actx = new (window.AudioContext || window.webkitAudioContext)();
+      const audioBuf = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("音乐解码超时（45秒无响应）")), 45000);
+        try {
+          actx.decodeAudioData(audioAb, (buf) => { clearTimeout(timer); resolve(buf); }, (err) => { clearTimeout(timer); reject(new Error("音乐解码失败：" + ((err && err.message) || "格式不支持"))); });
+        } catch (eD) { clearTimeout(timer); reject(eD); }
+      });
+      const dur = audioBuf.duration;
+      if (!isFinite(dur) || dur <= 1) throw new Error("音乐时长异常");
+      // 3) 预解码图片 + 统一画布
+      setSynth("⏳ 处理图片…");
+      const bmps = [];
+      for (let i = 0; i < imgBufs.length; i++) bmps.push(await createImageBitmap(new Blob([imgBufs[i]])));
+      const CW = 1080, CH = 1920;
+      const canvas = document.createElement("canvas");
+      canvas.width = CW; canvas.height = CH;
+      const ctx = canvas.getContext("2d");
+      const seg = dur / imgs.length;
+      // 4) Mediabunny 编码：视频轨 1fps 静态帧 + AAC 音轨
+      setSynth("⏳ 编码视频中…（" + Math.round(dur) + " 秒）");
+      const output = new m.Output({ format: new m.Mp4OutputFormat(), target: new m.BufferTarget() });
+      // 视频源双版本兼容：新版 VideoSampleSource（VideoSample 包装帧），1.66.x 是 CanvasSource（add 直接传 canvas）
+      let vSrc, addFrame;
+      if (typeof m.VideoSampleSource === "function") {
+        vSrc = new m.VideoSampleSource({ codec: "avc", quality: new m.Quality({ bitrate: 2500000 }) });
+        output.addVideoTrack(vSrc);
+        addFrame = (tSec, fDur, kf) => {
+          const sample = new m.VideoSample(canvas, { timestamp: tSec, duration: fDur });
+          return vSrc.add(sample, { keyFrame: kf }).then(() => { try { sample.close && sample.close(); } catch (eC) {} });
+        };
+      } else if (typeof m.CanvasSource === "function") {
+        vSrc = new m.CanvasSource(canvas, { codec: "avc", quality: new m.Quality({ bitrate: 2500000 }) });
+        output.addVideoTrack(vSrc);
+        addFrame = (tSec, fDur, kf) => vSrc.add(canvas, { timestamp: tSec, duration: fDur, keyFrame: kf });
+      } else {
+        throw new Error("合成组件缺视频源类（Mediabunny 版本不匹配）");
+      }
+      const aSrc = new m.AudioBufferSource({ codec: "aac", quality: new m.Quality({ bitrate: 128000 }) });
+      output.addAudioTrack(aSrc);
+      await output.start();
+      const totalFrames = Math.max(imgs.length, Math.ceil(dur));
+      for (let f = 0; f < totalFrames; f++) {
+        if (f % 30 === 0) setSynth("⏳ 编码中 " + Math.round(f / totalFrames * 100) + "%（" + f + "/" + totalFrames + " 帧）");
+        const tSec = f;
+        const idx = Math.min(imgs.length - 1, Math.floor(tSec / seg));
+        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, CW, CH);
+        try {
+          const bmp = bmps[idx];
+          const r = Math.min(CW / bmp.width, CH / bmp.height);
+          const w = bmp.width * r, h = bmp.height * r;
+          ctx.drawImage(bmp, (CW - w) / 2, (CH - h) / 2, w, h);
+        } catch (eD) {}
+        const fDur = Math.min(1, dur - tSec) || 1;
+        await addFrame(tSec, fDur, f % 5 === 0);
+      }
+      vSrc.close();
+      await aSrc.add(audioBuf);
+      aSrc.close();
+      await output.finalize();
+      const ab2 = output.target && output.target.buffer;
+      if (!ab2 || !ab2.byteLength) throw new Error("合成结果为空");
+      // 5) 落盘
+      let name = "抖音图文合成_" + Date.now() + ".mp4";
+      try {
+        const t2 = String((aw && aw.desc) || "").replace(/[\\/:*?"<>|\s#]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 36);
+        if (t2) name = t2 + "_图文合成.mp4";
+      } catch (eN) {}
+      saveBlob(ab2, name, "video/mp4");
+      toast("✓ 图文视频已保存：" + name, "success");
+      log.info("⑦图文合成 完成:", name, Math.round(dur) + "s", Math.round(ab2.byteLength / 1048576) + "MB", imgs.length + "图");
+    } catch (e) {
+      toast("图文合成失败：" + ((e && e.message) || e), "error");
+      log.error("⑦图文合成异常", e);
+    } finally {
+      state.__dySynthText = "";
+      setBtn("🎬 合成视频（图+音乐）", "#e67e22");
+    }
+  }
+
+  function downloadDouyinCurrent($btn) {
+    const setBtn = (txt, bg) => { try { if ($btn) { $btn.textContent = txt; if (bg) $btn.style.background = bg; } } catch (e) {} };
+    try {
+      if (!_GM_download) { toast("需要暴力猴/TamperMonkey 才能下载到桌面", "error"); return; }
+      const list = dySources(pageSig());
+      const vids = list.filter((it) => it && it.mediaType === "video" && it.url);
+      if (!vids.length) {
+        toast("还没抓到视频直链：请先让视频播放几秒，再点下载", "warn");
+        log.info("⑦抖音直下：dySources 无结果");
+        return;
+      }
+      const best = vids[0];
+      const fileName = best.fileName || ("抖音视频_" + Date.now() + ".mp4");
+      log.info("⑦抖音直下 开始:", best.type, best.quality, best.dims, best.url.slice(0, 90));
+      toast("开始下载：" + fileName + "（" + best.quality + " 无水印）", "");
+      // 进度写进 state（面板重绘会冲掉按钮文字，进度必须由 state 驱动渲染）
+      setBtn("⏳ 下载中…", "#909399");
+      downloadWithProgress({
+        kind: "dy", url: best.url, name: fileName, size: best.size || 0,
+        referer: "https://www.douyin.com/",
+        onDone: () => { setBtn("⬇ 下载当前视频", "#8e44ad"); log.info("⑦抖音直下 完成:", fileName); },
+        onFail: () => { setBtn("⬇ 下载当前视频", "#8e44ad"); },
+      });
+    } catch (e) {
+      try { state.__dyDl = null; } catch (eDl) {}
+      toast("抖音下载失败：" + ((e && e.message) || e), "error");
+      log.error("⑦抖音直下异常", e);
+      setBtn("⬇ 下载当前视频", "#8e44ad");
+    }
   }
 
   async function mergeDirectPair(videoItem, audioItem) {
@@ -2173,10 +2871,11 @@
   }
   // 为可拖拽元素绑定：按下拖动改坐标，短按不触发点击；拖动超过阈值记为拖拽，阻止后续 click
   // dragHandle 可选：只在该子元素上按下才拖拽（面板内部区域留给滚动/点击）
-  function makeDraggable(el, key, dragHandle) {
+  function makeDraggable(el, key, dragHandle, canDrag) {
     let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false;
     const start = (e) => {
       if (e.button !== 0) return;
+      if (canDrag && !canDrag()) return;
       // 点到链接/按钮/输入框时不拦截，保证下载等点击正常触发
       const t = e.target;
       if (t && t.closest && t.closest("a,button,input,textarea,select,#qidian-panel-close,[data-qd-dl],[data-qd-merge],[data-qd-sw],[data-qd-seg-merge]")) return;
@@ -2224,17 +2923,68 @@
     btn.style.cssText = "position:fixed;right:16px;bottom:120px;z-index:2147483646;width:44px;height:44px;border-radius:50%;background:rgba(22,119,255,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.3);user-select:none;";
     btn.textContent = "⤓";
     btn.addEventListener("click", () => togglePanel());
+    // ===== ⤓ 悬浮按钮停靠（默认停靠屏幕右上角）：平时藏进上边沿只露 8px 把手，鼠标碰把手滑出，离开 1.2s 自动缩回；
+    // 右键按钮切换 停靠/自由（自由=恢复拖动过的位置或默认右下角）。停靠模式禁拖动，防止拖进屏幕外找不回。
+    // 面板随时可用 Ctrl+Alt+D 呼出，不依赖按钮
+    let btnDocked = true;
+    try { btnDocked = localStorage.getItem("qidian_btn_dock") !== "0"; } catch (eDock0) {}
+    const DOCK_BOTTOM = -36, SHOW_BOTTOM = 6;   // 44px 高：停靠露 8px 把手 / 滑出留 6px 边距；停靠右下角（右上角是抖音投稿/头像区，会打架）
+    const applyDock = () => {
+      if (btnDocked) {
+        btn.style.right = "12px"; btn.style.left = "auto"; btn.style.top = "auto";
+        btn.style.bottom = DOCK_BOTTOM + "px"; btn.style.opacity = "0.85";
+        btn.title = BRAND + " v" + VERSION + "（停靠右下角：鼠标碰把手呼出；右键解除停靠）";
+      } else {
+        btn.style.opacity = "1";
+        btn.title = BRAND + " v" + VERSION + "（Ctrl+Alt+D 开关面板；右键停靠右下角）";
+        applyPos(btn, "btn");
+        // applyPos 无保存位置时不动作：清掉停靠残留的 top/left，回到 cssText 默认（右下角）
+        let savedPos = null;
+        try { savedPos = loadPos().btn; } catch (ePos) {}
+        if (!savedPos || typeof savedPos.x !== "number") { btn.style.top = ""; btn.style.left = ""; btn.style.right = "16px"; btn.style.bottom = "120px"; }
+      }
+    };
+    let dockHideTimer = null;
+    btn.addEventListener("mouseenter", () => {
+      if (!btnDocked) return;
+      if (dockHideTimer) { clearTimeout(dockHideTimer); dockHideTimer = null; }
+      btn.style.bottom = SHOW_BOTTOM + "px";
+    });
+    btn.addEventListener("mouseleave", () => {
+      if (!btnDocked) return;
+      if (dockHideTimer) clearTimeout(dockHideTimer);
+      dockHideTimer = setTimeout(() => { btn.style.bottom = DOCK_BOTTOM + "px"; }, 1200);
+    });
+    btn.addEventListener("contextmenu", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      btnDocked = !btnDocked;
+      try { localStorage.setItem("qidian_btn_dock", btnDocked ? "1" : "0"); } catch (eDock1) {}
+      applyDock();
+      toast(btnDocked ? "⤓ 已停靠右上角（鼠标碰把手呼出，右键解除）" : "⤓ 已恢复自由位置（右键可重新停靠）", "");
+    });
+    window.addEventListener("resize", () => { if (btnDocked) applyDock(); });
+    applyDock();
     document.body.appendChild(btn);
-    applyPos(btn, "btn");
-    makeDraggable(btn, "btn");
+    makeDraggable(btn, "btn", null, () => !btnDocked);
     state.panelBtn = btn;
-    // 快捷键 Ctrl+Alt+D
+    // 快捷键：
+    //   Ctrl+Alt+D 开关面板
+    //   Ctrl+Alt+R 随时录屏开关（全站通用，不用开面板、不用等抓取失败）——没在录就启动，录着就停止保存
     document.addEventListener("keydown", (e) => {
+      const tag = (e.target && e.target.tagName) || "";
+      if (/input|textarea|select/i.test(tag) || (e.target && e.target.isContentEditable)) return;
       if (e.ctrlKey && e.altKey && (e.key === "d" || e.key === "D")) {
-        const tag = (e.target && e.target.tagName) || "";
-        if (/input|textarea|select/i.test(tag) || (e.target && e.target.isContentEditable)) return;
         e.preventDefault();
         togglePanel();
+        return;
+      }
+      if (e.ctrlKey && e.altKey && (e.key === "r" || e.key === "R")) {
+        e.preventDefault();
+        // 同步调用：getDisplayMedia 必须在用户手势里第一个 await，keydown 里直接调用有效
+        const rec = state.recorder && state.recorder.rec;
+        if (rec && rec.state === "recording") { log.info("⑥快捷键 Ctrl+Alt+R：停止并保存"); stopVideoRecording(); }
+        else { log.info("⑥快捷键 Ctrl+Alt+R：启动录制"); startVideoRecording(); }
+        return;
       }
     }, true);
   }
@@ -2245,8 +2995,9 @@
     el.style.display = el.style.display === "none" ? "block" : "none";
   }
 
-  // 当前展示用源：抖音解析优先；抖音页解析为空则不给嗅探兜底，避免页面请求误点亮分类
+  // 当前展示用源：抖音解析优先；抖音页解析为空则不给嗅探兜底，避免页面请求误点亮分类；音盒页整页豁免
   function currentSources() {
+    if (isYinhe()) return [];
     const f = currentFilter();
     const sniffed = Array.from(state.videoUrlMap.values()).filter(f);
     if (isDouyin()) {
@@ -2319,6 +3070,8 @@
     // 定时刷新状态（标题/段数/覆盖/开关态）；抖音页隔次跳过，实际约 3 秒一刷，降低重 DOM 页面开销
     if (state.panel.refreshTimer) clearInterval(state.panel.refreshTimer);
     state.panel.refreshTimer = setInterval(() => {
+      // BV 输入框正在编辑时暂停整块重绘：否则每 1.5s 重建 DOM 会吞掉焦点/光标，字打不进去
+      if (state.__biliTyping) return;
       if (state.panel && !state.panel.el.style.display || state.panel.el.style.display !== "none") {
         if (isDouyin()) { state.__dyPaintSkip = !state.__dyPaintSkip; if (state.__dyPaintSkip) return; }
         paintPanel(state.panel.el);
@@ -2342,7 +3095,7 @@
       const segItems2 = [];
       g.keys.forEach((x) => { const b = state.groupBytes.get(x.k); if (b && b.length) segItems2.push({ mediaType: x.mediaType, bytes: b }); });
       if (!segItems2.length) { toast("该组没有固化字节", "error"); return; }
-      toast("组" + (gi + 1) + " 合并封装中…", "");
+      log.info("组" + (gi + 1) + " 合并封装中…");
       let fm4s = false;
       for (const x of segItems2) {
         if (x.bytes.length < 12) continue;
@@ -2350,16 +3103,23 @@
         if (box === "ftyp" || box === "styp" || box === "moof") { fm4s = true; break; }
       }
       const buffer = fm4s ? await muxSegmentsToMp4(MB(), segItems2) : await muxTsToMp4(MB(), segItems2.map((x) => x.bytes));
-      const baseName = ((trackTitle() || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 50)) || "video";
-      // 组文件名用内容时间段命名（不再用会话性的组序号）：跨会话/跨轮绝不冲突，看到文件名即知是哪段内容
-      const tr = (g.posMin >= 0 && g.posMax >= 0)
-        ? fmtPos(g.posMin).replace(/:/g, "m") + "s-" + fmtPos(g.posMax).replace(/:/g, "m") + "s"
-        : "组" + (gi + 1);
-      const fileName = baseName + "_" + tr + ".mp4";
+      // 组文件名简化为序号（用户要求）：片段01.mp4 / 片段02.mp4…，不再用冗长的标题+时间段
+      const seq = String(gi + 1).padStart(2, "0");
+      let fileName = "片段" + seq + ".mp4";
+      // 同名已存在时（同会话重复下载/跨会话残留）自动加后缀，避免覆盖
+      try {
+        let n = 1;
+        while (state.groupFiles && state.groupFiles.indexOf(fileName) >= 0) {
+          fileName = "片段" + seq + "(" + (++n) + ").mp4";
+        }
+      } catch (e) {}
       saveBlob(buffer, fileName, "video/mp4");
       if (!state.groupFiles) state.groupFiles = [];
       state.groupFiles.push(fileName);
-      toast("已保存 " + fileName, "success");
+      // 不弹提示语：在该组按钮后标"已下载 ✓"（按内容时间段持久化，刷新后仍在）
+      markGroupDone(g);
+      log.info("组" + (gi + 1) + " 已保存 " + fileName);
+      try { renderPanel(); } catch (eR) {}
     } catch (e) {
       log.error("分组合并失败", e);
       toast("分组合并失败：" + (e && e.message), "error");
@@ -2384,14 +3144,22 @@
   // 录制增强版：抖音等站点元素捕获（captureStream）拿不到视频轨，改走浏览器录屏 getDisplayMedia。
   // 面板⑥按钮不变、①-⑤下载功能零改动。点按钮 → 弹共享窗选【标签页】勾选音频 → 录制 → 面板点停止/浏览器停止共享 自动保存。
   async function startVideoRecording() {
-    let stream = null, rec = null, stopTimer = null;
+    // 防抖：getDisplayMedia 异步，从点击到弹窗确认之间有空窗期，重复点击会开出多条共享 → 同步上锁
+    if (state.__recStarting) { log.warn("⑥录制：启动中，忽略重复点击（防多条共享）"); return; }
+    state.__recStarting = true;
+    let stream = null, gotStream = null, rec = null, stopTimer = null;
+    // 统一释放：原始屏幕流 + 裁剪流全停，避免"停止共享"后指示条悬挂
+    const releaseAll = () => {
+      try { stream && stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+      try { gotStream && gotStream.getTracks().forEach((t) => t.stop()); } catch (e) {}
+    };
     try {
       log.info("⑥录制：启动流程开始（录屏版）");
       if (!window.MediaRecorder) { log.warn("⑥录制：MediaRecorder 不支持"); toast("当前浏览器不支持 MediaRecorder", "error"); return; }
       if (state.recorder && state.recorder.rec && state.recorder.rec.state === "recording") { log.warn("⑥录制：已有录制进行中"); toast("已有录制进行中", "warn"); return; }
 
-      // 用户手势内先确认桌面目录授权（仅首次弹一次选目录），之后保存自动落桌面
-      try { await ensureDesktopDir(); } catch (e) { log.warn("桌面目录授权跳过", e); }
+      // 注意：getDisplayMedia 必须在点击的用户手势里第一个调用，绝不能先 await 别的（如目录授权），
+      // 否则手势被消耗 → getDisplayMedia 被浏览器拒绝 → 表现为"点开始没反应"。目录授权挪到录制结束后做。
 
       // getDisplayMedia 必须由用户手势直接触发；本函数由面板点击直接调用，符合条件
       if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
@@ -2405,13 +3173,21 @@
       } catch (e) {
         log.warn("⑥录制：用户取消或拒绝共享", e && e.name);
         toast("已取消共享，未开始录制", "warn");
+        state.__recStarting = false;
         return;
       }
       stream = got;
+      gotStream = got;
       const kinds = stream.getTracks().map((t) => t.kind).join(",") || "无";
       log.info("⑥录制：取得屏幕流 轨=" + kinds);
       const vt = stream.getVideoTracks()[0];
-      if (!vt) { log.warn("⑥录制：未取得画面轨"); toast("没拿到画面，请重选标签页", "error"); stream.getTracks().forEach((t) => t.stop()); return; }
+      // 拿到流就立刻绑定"停止共享"：无论后面卡在框选还是录制中，用户点浏览器停止共享都能释放流
+      if (vt) vt.onended = () => {
+        log.info("⑥录制：检测到共享已被浏览器停止，释放所有流");
+        try { releaseAll(); } catch (e) {}
+        if (rec && rec.state !== "inactive") { try { rec.stop(); } catch (e) {} }
+      };
+      if (!vt) { log.warn("⑥录制：未取得画面轨"); toast("没拿到画面，请重选标签页", "error"); releaseAll(); state.__recStarting = false; return; }
 
       // 区域选择：弹遮罩让用户框选要录的画面（默认给个视频位预设框），只录这块，画面小、无导航/推荐
       let crop = null;
@@ -2420,9 +3196,9 @@
         if (area) {
           crop = makeCroppedStream(stream, area);
           stream = crop.stream;
-          toast("🎥 已选区域，只录这一块", "success");
+          log.info("⑥录制：已选区域，只录这一块");
         } else {
-          toast("已取消框选，将录制整个标签页", "warn");
+          log.info("⑥录制：已取消框选，将录制整个标签页");
         }
       } catch (e) { log.warn("区域选择失败，回退整页", e); }
 
@@ -2431,7 +3207,7 @@
       try { rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream); }
       catch (e) {
         log.warn("⑥录制：指定编码失败，回退默认", e);
-        try { rec = new MediaRecorder(stream); } catch (e2) { log.error("⑥录制：默认编码也失败", e2); toast("录制启动失败：编码不支持", "error"); stream.getTracks().forEach((t) => t.stop()); return; }
+        try { rec = new MediaRecorder(stream); } catch (e2) { log.error("⑥录制：默认编码也失败", e2); toast("录制启动失败：编码不支持", "error"); releaseAll(); state.__recStarting = false; return; }
       }
       const usedMime = () => (rec.mimeType || mime || "video/webm");
       const chunks = [];
@@ -2449,28 +3225,37 @@
           const baseName = ((trackTitle() || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 50)) || "video";
           const stamp = fmtPos(Math.round((Date.now() - (state.recorder ? state.recorder.startAt : Date.now())) / 1000)).replace(/:/g, "m") + "s";
           const fileName = baseName + "_录制_" + stamp + ext;
-          saveRecordingToDesktop(blob, fileName, um).then((where) => {
-            if (where === "cancel") toast("已取消保存，blob 未落盘", "warn");
-            else if (where === "desktop") toast("🎥 已保存到桌面 " + fileName, "success");
-            else toast("🎥 已保存到下载目录 " + fileName + "（浏览器不支持选桌面）", "success");
-          });
+          try { saveRecordingToDesktop(blob, fileName, um); } catch (e) { saveBlob(blob, fileName, um.split(";")[0]); }
+          toast("🎥 已保存到桌面 " + fileName, "success");
         } catch (e) { log.error("录制保存失败", e); toast("录制保存失败", "error"); }
         try { crop && crop.dispose(); } catch (e) {}
         try { stream && stream.getTracks().forEach((t) => t.stop()); } catch (e) {}
         state.recorder = null;
+        state.__recording = false;
+        log.info("⑥录制：录制结束，提示浮层恢复");
         renderPanel();
       };
-      // 用户点浏览器「停止共享」→ 自动保存
-      vt.onended = () => { if (rec && rec.state !== "inactive") { log.info("⑥录制：检测到停止共享，自动保存"); try { rec.stop(); } catch (e) {} } };
+      // 「停止共享」监听已在拿到流时提前绑定，此处不再重复绑定
 
       // 记下录制前的音量状态，结束时原样恢复（防录完声音突然变大）
       try { snapshotVideoVolumeBeforeRecord(); } catch (e) {}
-      rec.start(1000);
+      // 录制开始：立刻封掉所有浮层提示并清掉框选阶段残留的 toast，绝不让提示进画面
+      state.__recording = true;
+      try { clearTimeout(msgTimer); const tb = document.getElementById("qidian-toast"); if (tb) tb.remove(); } catch (e) {}
+      try { rec.start(1000); }
+      catch (eStart) {
+        state.__recording = false;
+        log.error("⑥录制：rec.start 失败", eStart);
+        toast("录制启动失败：" + (eStart && eStart.message), "error");
+        try { releaseAll(); } catch (e2) {}
+        state.__recStarting = false;
+        return;
+      }
       state.recorder = { rec, chunks, startAt: Date.now(), mime: usedMime() };
-      // 隐藏下载面板与面板按钮，避免录进画面；控制改由顶部悬浮条承担
+      // 隐藏下载面板与面板按钮，避免录进画面；控制改由底部录制条承担
       try { hidePluginUIForRecord(); } catch (e) { log.warn("隐藏插件界面失败", e); }
-      toast("🎥 录制中：面板已隐藏，点顶部悬浮条停止/看倒计时", "success");
-      log.info("⑥录制：录制中（state=" + rec.state + "，界面已隐藏）");
+      // 录制中提示只写控制台，不弹浮层（会被录进画面）
+      log.info("⑥录制：录制中（state=" + rec.state + "，界面已隐藏）。快捷键：👁隐藏 / Alt+H恢复 / Alt+R停止");
       try { startRecHud(); } catch (e) { log.warn("悬浮录制条启动失败", e); }
 
       // 尽力自动停止：页面视频播完就停（检测不到就手动停止）
@@ -2506,13 +3291,100 @@
     } catch (e) {
       log.error("录制启动失败", e);
       toast("录制启动失败：" + (e && e.message), "error");
-      try { stream && stream.getTracks().forEach((t) => t.stop()); } catch (e2) {}
+      try { releaseAll(); } catch (e2) {}
+      state.__recStarting = false;
     }
+    // 正常走到这里说明录制已成功启动，解锁以便下次能点；真正"进行中"由 state.recorder 拦
+    state.__recStarting = false;
   }
 
   // ===== 独立悬浮录制条：DOM 只建一次，不随面板重绘，停止按钮永远点得到 =====
   // 显示「整段视频总时长的倒计时」——从总长往下数到 0（不是已录多久）。到 0 自动停止保存。
   // 总长优先自动读 video.duration；读不到（如抖音跨域）由用户填分钟数。
+  // 找到页面上真正可见的播放器区域（含 Shadow DOM；抖音 video 本身可能 0 高，向上找可见容器）
+  function findVisiblePlayerRect() {
+    const all = [];
+    const walk = (root) => {
+      if (!root || !root.querySelectorAll) return;
+      root.querySelectorAll("video").forEach((v) => all.push(v));
+      root.querySelectorAll("*").forEach((el) => { if (el.shadowRoot) walk(el.shadowRoot); });
+    };
+    walk(document);
+    let best = null, bestArea = 0;
+    for (const v of all) {
+      let r = v.getBoundingClientRect();
+      if (!(r.width > 200 && r.height > 100)) {
+        let p = v.parentElement;
+        for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
+          const pr = p.getBoundingClientRect();
+          if (pr.width > 200 && pr.height > 100 && pr.width <= innerWidth * 0.96 && pr.height <= innerHeight * 0.9) { r = pr; break; }
+        }
+      }
+      const area = r.width * r.height;
+      if (area > bestArea && r.width > 200 && r.height > 100) { bestArea = area; best = r; }
+    }
+    return best;
+  }
+
+  // 把录制条吸附到播放器控制条（视频底部居中；太宽则等比缩小）；滚动/resize/全屏自动跟随
+  function dockRecHudToPlayer() {
+    const hud = document.getElementById("qd-rec-hud");
+    if (!hud || state.__recHudManual) return;
+    try {
+      const fs = document.fullscreenElement;
+      if (fs && hud.parentElement !== fs) fs.appendChild(hud);
+      else if (!fs && hud.parentElement !== document.body) document.body.appendChild(hud);
+      const r = findVisiblePlayerRect();
+      if (!r) return;
+      const hw = hud.offsetWidth, hh = hud.offsetHeight;
+      if (!hw || !hh) return;
+      const scale = hw > r.width - 16 ? Math.max(0.5, (r.width - 16) / hw) : 1;
+      hud.style.transformOrigin = "bottom center";
+      hud.style.transform = scale < 1 ? "scale(" + scale.toFixed(3) + ")" : "none";
+      const ew = hw * scale, eh = hh * scale;
+      let left = r.left + (r.width - ew) / 2;
+      // 下移到播放器底边下方：条的顶部落在播放器底边往上仅 10% 自身高，几乎整条压在控制条/画面外
+      let top = r.bottom - Math.round(eh * 0.1);
+      left = Math.max(4, Math.min(left, innerWidth - ew - 4));
+      top = Math.max(4, Math.min(top, innerHeight - eh - 4));
+      hud.style.left = Math.round(left) + "px";
+      hud.style.top = Math.round(top) + "px";
+    } catch (e) {}
+  }
+
+  // 隐藏录制条：缩成一个小红点，点红点或按 Alt+H 恢复；Alt+R 随时停止并保存
+  function ensureRecMini() {
+    let m = document.getElementById("qd-rec-mini");
+    if (m) return m;
+    m = document.createElement("div");
+    m.id = "qd-rec-mini";
+    m.style.cssText = "position:fixed;right:12px;bottom:12px;z-index:2147483647;width:22px;height:22px;border-radius:50%;background:rgba(255,45,85,.92);color:#fff;display:none;align-items:center;justify-content:center;font:12px/1 sans-serif;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.45);user-select:none;";
+    m.textContent = "●";
+    m.title = "点击显示录制条（Alt+H）";
+    m.addEventListener("click", (e) => { e.stopPropagation(); setRecHudHidden(false); });
+    document.body.appendChild(m);
+    return m;
+  }
+
+  function setRecHudHidden(hidden) {
+    const hud = document.getElementById("qd-rec-hud");
+    if (!hud) return;
+    const mini = ensureRecMini();
+    if (hidden) {
+      const r = hud.getBoundingClientRect();
+      mini.style.left = Math.round(Math.max(4, Math.min(r.left, innerWidth - 26))) + "px";
+      mini.style.top = Math.round(Math.max(4, Math.min(r.top, innerHeight - 26))) + "px";
+      mini.style.right = "auto"; mini.style.bottom = "auto";
+      mini.style.display = "flex";
+      hud.style.display = "none";
+    } else {
+      mini.style.display = "none";
+      hud.style.display = "flex";
+      dockRecHudToPlayer();
+    }
+    state.__recHudHidden = !!hidden;
+  }
+
   function ensureRecHud() {
     let hud = document.getElementById("qd-rec-hud");
     if (hud) return hud;
@@ -2521,6 +3393,7 @@
     hud.style.cssText = "position:fixed;top:12px;left:12px;z-index:2147483647;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:rgba(20,24,32,.94);color:#fff;box-shadow:0 4px 20px rgba(0,0,0,.35);font:13px/1.4 -apple-system,'Microsoft YaHei',sans-serif;white-space:nowrap;";
     hud.innerHTML =
       '<span id="qd-rec-grip" title="拖动移动录制条" style="color:#9aa4b2;cursor:move;font-size:15px;letter-spacing:-2px;padding:0 2px;user-select:none;">⠿</span>' +
+      '<button id="qd-rec-hide" title="隐藏录制条（Alt+H 恢复）" style="padding:4px 9px;border:0;border-radius:8px;background:#3a4252;color:#d7dee9;font-weight:700;font-size:12px;cursor:pointer;">👁 隐藏</button>' +
       '<span style="color:#ff4d6a;font-weight:800;">● 录制中</span>' +
       '<span id="qd-rec-left" style="color:#ffd166;font-variant-numeric:tabular-nums;font-weight:800;font-size:15px;">剩余 --:--</span>' +
       '<span id="qd-rec-total" style="color:#9aa4b2;font-variant-numeric:tabular-nums;font-size:11px;">总长 --:--</span>' +
@@ -2542,17 +3415,21 @@
       }
     } catch (e) {}
 
-    // 拖拽手柄移动（按钮/输入框不触发拖动）
+    // 拖拽手柄移动（按钮/输入框不触发拖动）；拖动后进入自由模式，双击 ⠿ 回到播放器控制条
     const grip = hud.querySelector("#qd-rec-grip");
     if (grip) {
-      let drag = null;
+      let drag = null, moved = false, sx = 0, sy = 0;
+      grip.title = "拖动移动，双击回到播放器控制条";
       grip.addEventListener("mousedown", (e) => {
         e.preventDefault(); e.stopPropagation();
         const r = hud.getBoundingClientRect();
         drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+        moved = false; sx = e.clientX; sy = e.clientY;
       });
       document.addEventListener("mousemove", (e) => {
         if (!drag) return;
+        if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) > 3) moved = true;
+        if (!moved) return;
         const x = Math.max(0, Math.min(e.clientX - drag.dx, innerWidth - hud.offsetWidth));
         const y = Math.max(0, Math.min(e.clientY - drag.dy, innerHeight - hud.offsetHeight));
         hud.style.left = x + "px"; hud.style.top = y + "px";
@@ -2560,11 +3437,22 @@
       document.addEventListener("mouseup", () => {
         if (!drag) return;
         drag = null;
-        try { localStorage.setItem(POS_KEY, JSON.stringify({ x: Math.round(hud.getBoundingClientRect().left), y: Math.round(hud.getBoundingClientRect().top) })); } catch (e) {}
+        if (moved) {
+          state.__recHudManual = true;
+          hud.style.transform = "none";
+          try { localStorage.setItem(POS_KEY, JSON.stringify({ x: Math.round(hud.getBoundingClientRect().left), y: Math.round(hud.getBoundingClientRect().top) })); } catch (e) {}
+        }
+      });
+      grip.addEventListener("dblclick", (e) => {
+        e.preventDefault(); e.stopPropagation();
+        state.__recHudManual = false;
+        dockRecHudToPlayer();
+        toast("录制条已回到播放器控制条", "success");
       });
     }
 
     hud.querySelector("#qd-rec-stop").addEventListener("click", (e) => { e.stopPropagation(); stopVideoRecording(); });
+    hud.querySelector("#qd-rec-hide").addEventListener("click", (e) => { e.stopPropagation(); setRecHudHidden(true); toast("录制条已隐藏，点小红点或按 Alt+H 恢复", "success"); });
     hud.querySelector("#qd-rec-set").addEventListener("click", (e) => {
       e.stopPropagation();
       const v = parseInt(hud.querySelector("#qd-rec-min").value, 10);
@@ -2601,6 +3489,8 @@
   function startRecHud() {
     const hud = ensureRecHud();
     hud.style.display = "flex";
+    state.__recHudManual = false;
+    dockRecHudToPlayer();
     // 自动识别视频总长：遍历可达 video 取合理 duration，填入输入框并启动倒数
     let dur = 0;
     try {
@@ -2622,7 +3512,19 @@
       toast("读不到视频总长，请在悬浮条填总长分钟数", "warn");
     }
     if (state.recHudTimer) clearInterval(state.recHudTimer);
-    state.recHudTimer = setInterval(tickRecHud, 250);
+    state.recHudTimer = setInterval(() => { tickRecHud(); dockRecHudToPlayer(); }, 250);
+    if (!state.__recHudEventsBound) {
+      state.__recHudEventsBound = true;
+      addEventListener("scroll", () => dockRecHudToPlayer(), true);
+      addEventListener("resize", () => dockRecHudToPlayer());
+      document.addEventListener("fullscreenchange", () => dockRecHudToPlayer());
+      document.addEventListener("keydown", (e) => {
+        if (!state.recorder || !e.altKey || e.ctrlKey) return; // Ctrl+Alt+R 由全局快捷键处理，这里只管单独 Alt
+        const k = (e.key || "").toLowerCase();
+        if (k === "h") { e.preventDefault(); setRecHudHidden(!state.__recHudHidden); }
+        if (k === "r") { e.preventDefault(); stopVideoRecording(); }
+      });
+    }
     tickRecHud();
   }
 
@@ -2630,6 +3532,9 @@
     if (state.recHudTimer) { clearInterval(state.recHudTimer); state.recHudTimer = null; }
     const hud = document.getElementById("qd-rec-hud");
     if (hud) { try { hud.remove(); } catch (e) { hud.style.display = "none"; } }
+    const mini = document.getElementById("qd-rec-mini");
+    if (mini) { try { mini.remove(); } catch (e) { mini.style.display = "none"; } }
+    state.__recHudHidden = false;
   }
 
   // ===== 区域录制：先框选屏幕上一块区域，只把这块录进视频，画面小、无导航/推荐 =====
@@ -2637,11 +3542,12 @@
   function pickRecordArea() {
     return new Promise((resolve) => {
       const mask = document.createElement("div");
-      mask.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);cursor:crosshair;";
+      // 遮罩全透明：不压暗页面，视频轮廓清晰可见，方便快速框定；只靠红框+提示标示选区
+      mask.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:transparent;cursor:crosshair;";
       const box = document.createElement("div");
       const tip = document.createElement("div");
-      tip.style.cssText = "position:absolute;top:16px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(20,24,32,.95);padding:10px 16px;border-radius:10px;font:14px/1.6 -apple-system,'Microsoft YaHei',sans-serif;text-align:center;pointer-events:none;";
-      tip.innerHTML = "拖动鼠标框选要录的区域（视频画面）· 可直接用粉色预设框<br><span style='color:#9aa4b2;font-size:12px;'>拖动画框可调整，松开后点「就用这块」</span>";
+      tip.style.cssText = "position:absolute;top:16px;left:50%;transform:translateX(-50%);color:#fff;background:rgba(20,24,32,.9);padding:8px 14px;border-radius:10px;font:13px/1.6 -apple-system,'Microsoft YaHei',sans-serif;text-align:center;pointer-events:none;transition:opacity .15s;";
+      tip.innerHTML = "拖动鼠标框选视频区域（页面不变暗，看清轮廓直接框）· 或用红框预设<br><span style='color:#9aa4b2;font-size:12px;'>拖动画框可调整，松开后点「就用这块」</span>";
       const okBtn = document.createElement("button");
       okBtn.textContent = "就用这块";
       okBtn.style.cssText = "position:absolute;left:50%;transform:translateX(-50%);bottom:24px;padding:10px 24px;border:0;border-radius:10px;background:#ff2d55;color:#fff;font-size:14px;font-weight:700;cursor:pointer;";
@@ -2654,11 +3560,12 @@
       let area = null, dragging = false, ax = 0, ay = 0;
       const apply = (a) => {
         area = a;
-        box.style.cssText = "position:absolute;left:" + a.x + "px;top:" + a.y + "px;width:" + a.w + "px;height:" + a.h + "px;border:3px solid #ff2d55;background:rgba(255,45,85,.10);box-sizing:border-box;pointer-events:none;";
+        box.style.cssText = "position:absolute;left:" + a.x + "px;top:" + a.y + "px;width:" + a.w + "px;height:" + a.h + "px;border:3px solid #ff2d55;background:rgba(255,45,85,.12);box-sizing:border-box;pointer-events:none;outline:1px solid rgba(255,255,255,.9);";
       };
       apply({ x: Math.round(innerWidth * 0.12), y: Math.round(innerHeight * 0.15), w: Math.round(innerWidth * 0.64), h: Math.round(innerHeight * 0.77) });
       const onDown = (e) => {
         if (e.target === okBtn || e.target === cancelBtn) return;
+        tip.style.opacity = "0"; // 一开始拖框就淡出提示，不挡视频画面
         dragging = true; ax = e.clientX; ay = e.clientY;
         apply({ x: ax, y: ay, w: 1, h: 1 });
       };
@@ -2774,9 +3681,10 @@
     const sources = currentSources();
     const cls = classify(sources);
     const dy = isDouyin();
-    // 抖音页只渲染 ③ 直链解析，跳过分段排序与抓全状态计算，避免重 DOM 页面反复全量扫描
-    const segItemsNow = dy ? [] : sortedSegs(segItems());
-    const st = dy ? { complete: false, pct: 0, text: "" } : captureStatus(segItemsNow.length, segItemsNow);
+    const yh = isYinhe();
+    // 抖音/音盒页跳过分段排序与抓全状态计算，避免重 DOM 页面反复全量扫描
+    const segItemsNow = (dy || yh) ? [] : sortedSegs(segItems());
+    const st = (dy || yh) ? { complete: false, pct: 0, text: "" } : captureStatus(segItemsNow.length, segItemsNow);
 
     // 分类胶囊两行：上排 ①②③，下排 ④⑤⑥；抖音页③标记，①②仅按本面板解析出的直链点亮，④⑤强制灰显
     // 分类胶囊：判定抖音 → 只亮③，其它分类（①②④⑤）全灰；普通站点按分类结果点亮
@@ -2804,9 +3712,29 @@
       '<div>' + chipRow(["①", "②", "③"]) + chipRow(["④", "⑤", "⑥"]) + '</div>' +
       '</div>';
 
+    // B站诊断行：播放时实时显示分段是否在增长、是否已锁定，一次定位"卡2段"原因
+    if (isBili) {
+      try {
+        const vv = mainVideo();
+        const durTxt = vv && isFinite(vv.duration) ? fmtTime(vv.duration) : "?";
+        const curTxt = vv && isFinite(vv.currentTime) ? fmtTime(vv.currentTime) : "?";
+        const locked = Array.from(document.querySelectorAll("video") || []).some((x) => x && x.__sxpoLocked);
+        const ended = !!state.__endedAt;
+        const initV = !!(state.groupInit && state.groupInit.video), initA = !!(state.groupInit && state.groupInit.audio);
+        html += '<div style="padding:8px 14px;background:#fffbe6;border-bottom:1px solid #ffe58f;font-size:12px;color:#8a6d00;line-height:1.7;">' +
+          '<b>🔍 B站诊断</b>：分段 ' + segItemsNow.length + ' · MSE写入 ' + (state.mseSeq || 0) + ' · init 视频' + (initV ? "有" : "无") + "/音频" + (initA ? "有" : "无") + '<br>' +
+          '播放 ' + curTxt + "/" + durTxt + ' · 已判抓全:' + (ended ? "是" : "否") + ' · 播放器锁定:' + (locked ? "是" : "否") +
+          '</div>';
+      } catch (eD) {}
+    }
+
     // 直链列表（①②）：抖音解析结果一并列入；只列真媒体；抖音页仅列本面板解析出的条目
       // 直链列表双保险：isDirectMedia 判定 + 已归档进 groupBytes 的分段一律排除（防止分组/分段数据污染直链下载）
       const direct = sources.filter((it) => isDirectMedia(it) && !state.groupBytes.has(segKey(it.url, it)) && (!dy || it.parsed));
+    // ⑦ 一键直下（抖音页）：合并到地址列表顶部（用户要求），先于直链条目显示
+    if (dy) {
+      html += '<div style="padding:10px 14px;border-bottom:1px solid #eee;background:#faf5ff;">' + dySevenHtml() + '</div>';
+    }
     if (direct.length) {
       html += '<div style="padding:10px 14px;border-bottom:1px solid #eee;"><div style="font-weight:700;margin-bottom:6px;">地址列表（点下载 / 复制地址）</div>';
       direct.forEach((it, i) => {
@@ -2864,14 +3792,24 @@
         if (state.groups && state.groups.length) {
           const gBtns = state.groups.map((g, gi) => {
             const range = (g.posMin >= 0 && g.posMax >= 0) ? fmtPos(g.posMin) + "–" + fmtPos(g.posMax) + " · " : "";
-            return '<a href="javascript:;" data-qd-group-dl="' + gi + '" title="把该组固化分片合成一个 mp4 下载" style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:10px;font-size:12px;color:#fff;background:#b8860b;text-decoration:none;">组' + (gi + 1) + "：" + range + g.n + "段 · 下载</a>";
+            const done = groupIsDone(g);
+            const label = done ? "已下载 ✓" : "下载";
+            const bg = done ? "#2e7d32" : "#b8860b";
+            const title = done ? "该组已下载，点此可重新下载" : "把该组固化分片合成一个 mp4 下载";
+            return '<a href="javascript:;" data-qd-group-dl="' + gi + '" title="' + title + '" style="display:inline-block;margin:2px 6px 2px 0;padding:2px 10px;border-radius:10px;font-size:12px;color:#fff;background:' + bg + ';text-decoration:none;">组' + (gi + 1) + "：" + range + g.n + "段 · " + label + "</a>";
           }).join("");
           groupHtml = '<div style="margin-top:6px;color:#555;font-size:12px;">📦 分组固化（每 ' + GROUP_SIZE + ' 段一组，点组名可单独下载该段精彩部分）：</div>' +
             '<div style="margin-top:2px;line-height:1.9;">' + gBtns + '</div>';
         }
       } catch (eG) {}
+      const segFoldOpen = !!state.__segFoldOpen;   // ⑤ 默认收起，点标题展开
+      const segHeadStatus = auto ? '<span style="color:#67c23a;">抓取中 ' + segItemsNow.length + ' 段</span>' : '<span style="color:#999;">' + segItemsNow.length + ' 段</span>';
       html += '<div style="padding:10px 14px;">' +
-        '<div style="font-weight:700;color:#67c23a;">⑤ 分段合并下载</div>' +
+        '<a href="javascript:;" data-qd-seg-fold style="display:flex;align-items:center;justify-content:space-between;text-decoration:none;">' +
+        '<span style="font-weight:700;color:#67c23a;">⑤ 分段合并下载 ' + segHeadStatus + '</span>' +
+        '<span style="font-size:12px;color:#999;">' + (segFoldOpen ? '▼ 收起' : '▶ 展开（非B站用）') + '</span>' +
+        '</a>' +
+        '<div style="' + (segFoldOpen ? "" : "display:none;") + '">' +
         '<div style="margin:6px 0;">' +
         '<a href="javascript:;" data-qd-sw style="padding:2px 10px;border-radius:10px;font-weight:700;font-size:12px;color:#fff;text-decoration:none;background:' + swBg + ';">' + swLabel + '</a>' +
         '<a href="javascript:;" data-qd-seg-merge style="margin-left:8px;padding:2px 10px;border-radius:10px;font-weight:700;font-size:12px;color:#fff;text-decoration:none;background:#1677ff;' + (st.complete ? "" : "display:none;") + ';">分段已抓全，点击开始合并</a>' +
@@ -2882,13 +3820,16 @@
           : '<div>已抓 <b>' + segItemsNow.length + '</b> 段，' + escapeHtml(preloadText(segItemsNow)) + '，未抓全</div><div>需听完才能抓全合并，拖进度条无效</div>') +
         groupHtml +
         '<div data-qd-seg-progress style="margin-top:6px;"><span style="display:inline-block;width:0%;"></span><em style="font-style:normal;color:#999;"></em></div>' +
+        '</div>' +
         '</div>';
     } else if (dy) {
       html += '<div style="padding:10px 14px;color:#9aa4b2;font-size:12px;">⑤ 分段合并：抖音短视频为整段直链，无需分段抓取。</div>';
     }
 
     if (!sources.length && !cls.segMode) {
-      html += '<div style="padding:14px;color:#999;">🔍 正在判断下载类型，请先播放几秒…</div>';
+      html += yh
+        ? '<div style="padding:14px;color:#9aa4b2;font-size:12px;">🎵 音盒本地页：歌曲就在你自己的后端，无需插件抓取下载。需要留档可用下方 ⑥ 录制。</div>'
+        : '<div style="padding:14px;color:#999;">🔍 正在判断下载类型，请先播放几秒…</div>';
     }
 
     // ⑥ 视频录制兜底（用户敲定全站通用，抖音也包括）：某视频解析抓不到地址时（③无结果），
@@ -2910,8 +3851,28 @@
         '</div></div>';
     }
 
+    // ⑦ 链接直下：B站 BV 号直下（抖音页的⑦已合并到上方地址列表顶部，不再重复渲染；音盒页整块不渲染）
+    if (!yh && !isDouyin()) {
+      html += '<div style="padding:10px 14px;border-top:1px solid #f0f2f5;">';
+      {
+        const savedBV = typeof state.__biliBV === "string" ? state.__biliBV : "";
+        html += '<div style="font-weight:700;color:#8e44ad;">⑦ B站 BV 号直下（推荐）</div>' +
+          '<div style="color:#555;font-size:12px;margin-top:4px;">贴 B站链接/BV 号，直接下官方高清 mp4 到桌面（音画同步，无需抓取/合并）</div>' +
+          '<div style="margin-top:6px;display:flex;gap:6px;">' +
+          '<input id="qd-bv-input" type="text" autocomplete="off" name="qd-bv-' + Date.now() + '" spellcheck="false" placeholder="请粘贴 B站链接或 BV 号" value="' + escapeHtml(savedBV) + '" style="flex:1;min-width:0;padding:4px 8px;border:1px solid #dcdfe6;border-radius:6px;font-size:12px;" />' +
+          '<a href="javascript:;" data-qd-bili-dl style="padding:4px 12px;border-radius:6px;font-weight:700;font-size:12px;color:#fff;background:#8e44ad;text-decoration:none;white-space:nowrap;">⬇ 下载到桌面</a>' +
+          '</div>';
+        // 下载进度条（始终渲染，display 由 state 控制；onprogress 直接刷 #qd-dl-* 即时更新，不等重绘）
+        html += dlProgressHtml(state.__biliDl);
+      }
+      html += '</div>';
+    }
+
     const body = state.panel.body || el;
+    // 重绘前记下 BV 输入框当前值，重绘后回填（面板每 1.5s 重绘，避免用户输入被冲掉）
+    try { const inp0 = body.querySelector("#qd-bv-input"); if (inp0) state.__biliBV = inp0.value; } catch (e) {}
     body.innerHTML = html;
+    try { const inp1 = body.querySelector("#qd-bv-input"); if (inp1 && inp1.value !== (state.__biliBV || "")) inp1.value = state.__biliBV || ""; } catch (e) {}
     // 存当前渲染上下文：委托 handler 从这里取数据（每次重绘自动更新，无闭包过期问题）
     state.__panelCtx = { direct, cls };
     // 事件委托挂 body：面板每 1.5s 重绘 innerHTML 也不会丢点击（根治⑤开关"点了没反应"的重绘竞态）
@@ -2925,14 +3886,47 @@
         const cp = t.closest("[data-qd-copy]");
         if (cp) { const arr2 = (state.__panelCtx && state.__panelCtx.direct) || []; const it2 = arr2[Number(cp.getAttribute("data-qd-copy"))]; if (it2) { copyText(it2.url); toast("地址已复制", ""); } return; }
         if (t.closest("[data-qd-merge]")) { const c3 = (state.__panelCtx && state.__panelCtx.cls) || {}; mergeDirectPair(c3.vDirect && c3.vDirect[0], c3.aDirect && c3.aDirect[0]); return; }
+        if (t.closest("[data-qd-seg-fold]")) { state.__segFoldOpen = !state.__segFoldOpen; try { renderPanel(); } catch (eF) {} return; }
         if (t.closest("[data-qd-sw]")) { toggleAuto(); return; }
         if (t.closest("[data-qd-rec-start]")) { log.info("⑥录制：收到开始请求，启动流程…"); startVideoRecording(); return; }
         if (t.closest("[data-qd-rec-stop]")) { log.info("⑥录制：收到停止请求"); stopVideoRecording(); return; }
         const gdl = t.closest("[data-qd-group-dl]");
         if (gdl) { downloadGroup(Number(gdl.getAttribute("data-qd-group-dl"))); return; }
+        if (t.closest("[data-qd-bili-dl]")) {
+          const inp = body.querySelector("#qd-bv-input");
+          const bv = inp ? inp.value : (state.__biliBV || "");
+          biliDownloadByBV(bv, t);
+          return;
+        }
+        if (t.closest("[data-qd-dy-dl]")) { downloadDouyinCurrent(t); return; }
+        if (t.closest("[data-qd-dy-imgs]")) { downloadDouyinImages(t); return; }
+        if (t.closest("[data-qd-dy-synth]")) { synthesizeDyImageVideo(t); return; }
         const segM = t.closest("[data-qd-seg-merge]");
-        if (segM) mergeSegments(sortedSegs(segItems()), body.querySelector("[data-qd-seg-progress]"));
+        if (segM) {
+          // 即时反馈：先把按钮文字改成"合并中"，确认点击已被接收（避免"点了没反应"的错觉）
+          try { segM.textContent = "⏳ 正在准备合并…"; segM.style.background = "#909399"; } catch (eB) {}
+          const segList = sortedSegs(segItems());
+          log.info("⑤合并按钮已点击，待合并段数=" + segList.length + "，merging=" + !!state.merging);
+          if (state.merging) { try { segM.textContent = "已有任务进行中"; } catch (eB2) {} toast("已有合并任务进行中，请稍候", "warn"); return; }
+          mergeSegments(segList, body.querySelector("[data-qd-seg-progress]"));
+        }
       });
+      // BV 输入框：实时存值 + 聚焦时暂停面板重绘（根治"字打不进去"：重绘会销毁输入框节点、吞掉光标）
+      body.addEventListener("input", (e) => {
+        try { if (e.target && e.target.id === "qd-bv-input") state.__biliBV = e.target.value; } catch (e2) {}
+      }, true);
+      body.addEventListener("focusin", (e) => {
+        try { if (e.target && e.target.id === "qd-bv-input") state.__biliTyping = true; } catch (e2) {}
+      }, true);
+      body.addEventListener("focusout", (e) => {
+        try {
+          if (e.target && e.target.id === "qd-bv-input") {
+            state.__biliBV = e.target.value;
+            state.__biliTyping = false;   // 失焦后恢复面板定时刷新
+            setTimeout(() => { try { paintPanel(state.panel && state.panel.el); } catch (e3) {} }, 50);
+          }
+        } catch (e2) {}
+      }, true);
     }
   }
 
@@ -2940,13 +3934,13 @@
     const on = !autoOn();
     setAutoOn(on);
     if (on) {
-      // 开开关：从头重播以完整覆盖
+      // 开开关：从头重播以完整覆盖（不弹提示，按钮变绿即是状态反馈）
       const v = mainVideo();
       if (v) { try { v.currentTime = 0; v.play(); } catch (e) {} }
-      toast(on ? "已开启分段下载，请完整听完到片尾" : "已关闭", "");
+      log.info("⑤分段下载已开启");
     } else {
       unlockPlayer(); navBlockRelease(); resetCaptureState();
-      toast("已关闭分段下载", "");
+      log.info("⑤分段下载已关闭");
     }
     renderPanel();
   }
@@ -2963,6 +3957,16 @@
 
   // #MODULES#
 
+  // ===== 早期 hook：脚本执行到这一行立即挂载，抢在 B站播放器初始化 append init 段之前 =====
+  // 三个 hook 在挂载瞬间只读取顶部已初始化的 state/_unsafe，包装函数体内其余引用等到真实请求时才求值，
+  // 因此这里（DOMContentLoaded 之前）调用安全，且不依赖任何 DOM。
+  try {
+    hookFetch();
+    hookXHR();
+    hookMSE();
+    log.info("早期 hook 已挂载（fetch/XHR/MSE），抢在播放器初始化前");
+  } catch (eEarlyHook) { log.warn("早期 hook 挂载异常", eEarlyHook && eEarlyHook.message); }
+
   // 启动
   try {
     document.addEventListener("DOMContentLoaded", init, true);
@@ -2973,9 +3977,7 @@
   function init() {
     try {
       versionBoot();
-      hookFetch();
-      hookXHR();
-      hookMSE();
+      // hookFetch/hookXHR/hookMSE 已在脚本顶层提前挂载，此处不再重复（内部虽有幂等判断，保持单一挂载点）
       armVideoEnded();
       startIdentityWatch();
       buildPanelButton();
